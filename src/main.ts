@@ -1,60 +1,192 @@
-import './style.css'
-import typescriptLogo from './assets/typescript.svg'
-import viteLogo from './assets/vite.svg'
-import heroImg from './assets/hero.png'
-import { setupCounter } from './counter.ts'
+import './style.css';
+import type { Project } from './types';
+import { createProject, deleteProject, getProjects, updateProject } from './storage';
 
-document.querySelector<HTMLDivElement>('#app')!.innerHTML = `
-<section id="center">
-  <div class="hero">
-    <img src="${heroImg}" class="base" width="170" height="179">
-    <img src="${typescriptLogo}" class="framework" alt="TypeScript logo"/>
-    <img src=${viteLogo} class="vite" alt="Vite logo" />
+const app = document.querySelector<HTMLDivElement>('#app');
+
+if (!app) {
+  throw new Error('Root #app not found');
+}
+
+app.innerHTML = `
+  <div class="page">
+    <header class="page-header">
+      <h1>ManageMe</h1>
+      <p class="subtitle">Proste zarządzanie projektami w przeglądarce (CRUD + localStorage).</p>
+    </header>
+
+    <main class="layout">
+      <section class="card">
+        <h2>Projekt</h2>
+        <form id="project-form" class="form">
+          <input type="hidden" id="project-id" />
+
+          <label class="field">
+            <span>Nazwa projektu</span>
+            <input id="project-name" type="text" placeholder="Np. Aplikacja CRM" required />
+          </label>
+
+          <label class="field">
+            <span>Opis</span>
+            <textarea id="project-description" rows="4" placeholder="Krótki opis celu projektu"></textarea>
+          </label>
+
+          <div class="form-actions">
+            <button type="submit" class="btn primary" id="save-btn">Zapisz</button>
+            <button type="button" class="btn ghost" id="cancel-edit-btn">Anuluj edycję</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="card">
+        <header class="card-header">
+          <h2>Lista projektów</h2>
+          <span class="chip" id="projects-count">0 projektów</span>
+        </header>
+        <div id="projects-empty" class="empty">
+          Brak projektów. Dodaj pierwszy projekt w formularzu obok.
+        </div>
+        <ul id="projects-list" class="projects-list"></ul>
+      </section>
+    </main>
   </div>
-  <div>
-    <h1>Get started</h1>
-    <p>Edit <code>src/main.ts</code> and save to test <code>HMR</code></p>
-  </div>
-  <button id="counter" type="button" class="counter"></button>
-</section>
+`;
 
-<div class="ticks"></div>
+const form = document.querySelector<HTMLFormElement>('#project-form');
+const idInput = document.querySelector<HTMLInputElement>('#project-id');
+const nameInput = document.querySelector<HTMLInputElement>('#project-name');
+const descriptionInput = document.querySelector<HTMLTextAreaElement>('#project-description');
+const cancelEditBtn = document.querySelector<HTMLButtonElement>('#cancel-edit-btn');
+const projectsList = document.querySelector<HTMLUListElement>('#projects-list');
+const projectsEmpty = document.querySelector<HTMLDivElement>('#projects-empty');
+const projectsCount = document.querySelector<HTMLSpanElement>('#projects-count');
+const saveBtn = document.querySelector<HTMLButtonElement>('#save-btn');
 
-<section id="next-steps">
-  <div id="docs">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#documentation-icon"></use></svg>
-    <h2>Documentation</h2>
-    <p>Your questions, answered</p>
-    <ul>
-      <li>
-        <a href="https://vite.dev/" target="_blank">
-          <img class="logo" src=${viteLogo} alt="" />
-          Explore Vite
-        </a>
-      </li>
-      <li>
-        <a href="https://www.typescriptlang.org" target="_blank">
-          <img class="button-icon" src="${typescriptLogo}" alt="">
-          Learn more
-        </a>
-      </li>
-    </ul>
-  </div>
-  <div id="social">
-    <svg class="icon" role="presentation" aria-hidden="true"><use href="/icons.svg#social-icon"></use></svg>
-    <h2>Connect with us</h2>
-    <p>Join the Vite community</p>
-    <ul>
-      <li><a href="https://github.com/vitejs/vite" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#github-icon"></use></svg>GitHub</a></li>
-      <li><a href="https://chat.vite.dev/" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#discord-icon"></use></svg>Discord</a></li>
-      <li><a href="https://x.com/vite_js" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#x-icon"></use></svg>X.com</a></li>
-      <li><a href="https://bsky.app/profile/vite.dev" target="_blank"><svg class="button-icon" role="presentation" aria-hidden="true"><use href="/icons.svg#bluesky-icon"></use></svg>Bluesky</a></li>
-    </ul>
-  </div>
-</section>
+if (
+  !form ||
+  !idInput ||
+  !nameInput ||
+  !descriptionInput ||
+  !cancelEditBtn ||
+  !projectsList ||
+  !projectsEmpty ||
+  !projectsCount ||
+  !saveBtn
+) {
+  throw new Error('ManageMe UI elements not found');
+}
 
-<div class="ticks"></div>
-<section id="spacer"></section>
-`
+function setEditing(project: Project | null): void {
+  if (!project) {
+    idInput.value = '';
+    nameInput.value = '';
+    descriptionInput.value = '';
+    saveBtn.textContent = 'Zapisz';
+    cancelEditBtn.disabled = true;
+  } else {
+    idInput.value = project.id;
+    nameInput.value = project.name;
+    descriptionInput.value = project.description;
+    saveBtn.textContent = 'Zapisz zmiany';
+    cancelEditBtn.disabled = false;
+    nameInput.focus();
+  }
+}
 
-setupCounter(document.querySelector<HTMLButtonElement>('#counter')!)
+function formatCount(count: number): string {
+  if (count === 1) return '1 projekt';
+  if (count >= 2 && count <= 4) return `${count} projekty`;
+  return `${count} projektów`;
+}
+
+function renderProjects(): void {
+  const projects = getProjects();
+
+  projectsList.innerHTML = '';
+
+  if (projects.length === 0) {
+    projectsEmpty.style.display = 'block';
+  } else {
+    projectsEmpty.style.display = 'none';
+  }
+
+  projectsCount.textContent = formatCount(projects.length);
+
+  for (const project of projects) {
+    const li = document.createElement('li');
+    li.className = 'project-item';
+    li.dataset.id = project.id;
+
+    li.innerHTML = `
+      <div class="project-main">
+        <h3>${project.name || 'Bez nazwy'}</h3>
+        <p>${project.description || '<brak opisu>'}</p>
+      </div>
+      <div class="project-actions">
+        <button type="button" class="btn small" data-action="edit">Edytuj</button>
+        <button type="button" class="btn small danger" data-action="delete">Usuń</button>
+      </div>
+    `;
+
+    projectsList.appendChild(li);
+  }
+}
+
+form.addEventListener('submit', (event) => {
+  event.preventDefault();
+
+  const name = nameInput.value.trim();
+  const description = descriptionInput.value.trim();
+
+  if (!name) {
+    nameInput.focus();
+    return;
+  }
+
+  const existingId = idInput.value;
+
+  if (existingId) {
+    updateProject(existingId, { name, description });
+  } else {
+    createProject({ name, description });
+  }
+
+  setEditing(null);
+  renderProjects();
+});
+
+cancelEditBtn.addEventListener('click', () => {
+  setEditing(null);
+});
+
+projectsList.addEventListener('click', (event) => {
+  const target = event.target as HTMLElement | null;
+  if (!target) return;
+
+  const action = target.dataset.action;
+  if (!action) return;
+
+  const item = target.closest<HTMLLIElement>('.project-item');
+  if (!item || !item.dataset.id) return;
+
+  const id = item.dataset.id;
+
+  if (action === 'edit') {
+    const projects = getProjects();
+    const project = projects.find((p) => p.id === id) ?? null;
+    setEditing(project);
+  }
+
+  if (action === 'delete') {
+    const confirmed = window.confirm('Czy na pewno chcesz usunąć ten projekt?');
+    if (!confirmed) return;
+    deleteProject(id);
+    if (idInput.value === id) {
+      setEditing(null);
+    }
+    renderProjects();
+  }
+});
+
+cancelEditBtn.disabled = true;
+renderProjects();
