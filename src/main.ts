@@ -1,5 +1,5 @@
 import './style.css';
-import type { Project, Story, StoryPriority, StoryState, User } from './types';
+import type { Project, Story, StoryPriority, StoryState, User, Task, TaskPriority } from './types';
 import {
   createProject,
   createStory,
@@ -12,6 +12,11 @@ import {
   setActiveProjectId,
   updateProject,
   updateStory,
+  getTasksByStory,
+  createTask,
+  updateTask,
+  deleteTask,
+  getUsers,
 } from './storage';
 
 const app = document.querySelector<HTMLDivElement>('#app');
@@ -133,34 +138,117 @@ app.innerHTML = `
 
         <ul id="stories-list" class="stories-list"></ul>
       </section>
+
+      <section class="card tasks-card">
+        <header class="card-header">
+          <div>
+            <h2>Tablica Zadań</h2>
+            <p class="card-subtitle" id="tasks-story-label">Wybierz historyjkę, aby zarządzać zadaniami.</p>
+          </div>
+          <div class="card-header-right">
+            <button type="button" class="btn small primary" id="add-task-btn" disabled>Dodaj zadanie</button>
+          </div>
+        </header>
+        <div class="kanban-board" id="kanban-board" style="display: none;">
+          <div class="kanban-column">
+            <h3>Do zrobienia</h3>
+            <div class="kanban-list" id="kanban-todo" data-state="todo"></div>
+          </div>
+          <div class="kanban-column">
+            <h3>W toku</h3>
+            <div class="kanban-list" id="kanban-doing" data-state="doing"></div>
+          </div>
+          <div class="kanban-column">
+            <h3>Zamknięte</h3>
+            <div class="kanban-list" id="kanban-done" data-state="done"></div>
+          </div>
+        </div>
+      </section>
     </main>
+  </div>
+
+  <div class="modal hidden" id="task-modal">
+    <div class="modal-content">
+      <header class="modal-header">
+        <h2 id="task-modal-title">Zadanie</h2>
+        <button type="button" class="btn clean" id="task-modal-close">&times;</button>
+      </header>
+      <form id="task-form" class="form">
+        <input type="hidden" id="task-id" />
+        
+        <div class="stories-form-grid">
+          <label class="field">
+            <span>Nazwa zadania</span>
+            <input id="task-name" type="text" placeholder="Krótka nazwa" required />
+          </label>
+          <label class="field">
+            <span>Priorytet</span>
+            <select id="task-priority">
+              <option value="low">Niski</option>
+              <option value="medium" selected>Średni</option>
+              <option value="high">Wysoki</option>
+            </select>
+          </label>
+          <label class="field">
+            <span>Czas (godziny)</span>
+            <input id="task-hours" type="number" min="0" step="0.5" value="1" required />
+          </label>
+          <label class="field" id="task-assignee-field" style="display: none;">
+            <span>Przypisz pracownika</span>
+            <select id="task-assignee">
+               <option value="">Wybierz...</option>
+            </select>
+          </label>
+        </div>
+
+        <label class="field">
+          <span>Opis</span>
+          <textarea id="task-description" rows="3" placeholder="Szczegóły..."></textarea>
+        </label>
+        
+        <div class="task-stats" id="task-stats" style="display: none;">
+           <p><strong>Stan:</strong> <span id="task-state-label"></span></p>
+           <p><strong>Przypisano:</strong> <span id="task-assignee-label"></span></p>
+           <p><strong>Dodano:</strong> <span id="task-created-at"></span></p>
+           <p id="task-started-container" style="display:none;"><strong>Start:</strong> <span id="task-started-at"></span></p>
+           <p id="task-finished-container" style="display:none;"><strong>Koniec:</strong> <span id="task-finished-at"></span></p>
+        </div>
+
+        <div class="form-actions" id="task-form-actions">
+           <button type="submit" class="btn primary" id="task-save-btn">Zapisz zadanie</button>
+           <button type="button" class="btn danger" id="task-delete-btn" style="display: none;">Usuń</button>
+           <button type="button" class="btn primary" id="task-start-btn" style="display: none;">Rozpocznij</button>
+           <button type="button" class="btn success" id="task-done-btn" style="display: none;">Zakończ</button>
+        </div>
+      </form>
+    </div>
   </div>
 `;
 
-const userNameLabel = document.querySelector<HTMLSpanElement>('#user-name');
-const form = document.querySelector<HTMLFormElement>('#project-form');
-const idInput = document.querySelector<HTMLInputElement>('#project-id');
-const nameInput = document.querySelector<HTMLInputElement>('#project-name');
-const descriptionInput = document.querySelector<HTMLTextAreaElement>('#project-description');
-const cancelEditBtn = document.querySelector<HTMLButtonElement>('#cancel-edit-btn');
-const projectsList = document.querySelector<HTMLUListElement>('#projects-list');
-const projectsEmpty = document.querySelector<HTMLDivElement>('#projects-empty');
-const projectsCount = document.querySelector<HTMLSpanElement>('#projects-count');
-const saveBtn = document.querySelector<HTMLButtonElement>('#save-btn');
+const userNameLabel = document.querySelector<HTMLSpanElement>('#user-name')!;
+const form = document.querySelector<HTMLFormElement>('#project-form')!;
+const idInput = document.querySelector<HTMLInputElement>('#project-id')!;
+const nameInput = document.querySelector<HTMLInputElement>('#project-name')!;
+const descriptionInput = document.querySelector<HTMLTextAreaElement>('#project-description')!;
+const cancelEditBtn = document.querySelector<HTMLButtonElement>('#cancel-edit-btn')!;
+const projectsList = document.querySelector<HTMLUListElement>('#projects-list')!;
+const projectsEmpty = document.querySelector<HTMLDivElement>('#projects-empty')!;
+const projectsCount = document.querySelector<HTMLSpanElement>('#projects-count')!;
+const saveBtn = document.querySelector<HTMLButtonElement>('#save-btn')!;
 
 // Story elements
-const storiesCard = document.querySelector<HTMLElement>('.stories-card');
-const storiesProjectLabel = document.querySelector<HTMLParagraphElement>('#stories-project-label');
-const storyForm = document.querySelector<HTMLFormElement>('#story-form');
-const storyIdInput = document.querySelector<HTMLInputElement>('#story-id');
-const storyNameInput = document.querySelector<HTMLInputElement>('#story-name');
-const storyDescriptionInput = document.querySelector<HTMLTextAreaElement>('#story-description');
-const storyPrioritySelect = document.querySelector<HTMLSelectElement>('#story-priority');
-const storyStateSelect = document.querySelector<HTMLSelectElement>('#story-state');
-const storySaveBtn = document.querySelector<HTMLButtonElement>('#story-save-btn');
-const storyCancelBtn = document.querySelector<HTMLButtonElement>('#story-cancel-btn');
-const storiesEmpty = document.querySelector<HTMLDivElement>('#stories-empty');
-const storiesList = document.querySelector<HTMLUListElement>('#stories-list');
+const storiesCard = document.querySelector<HTMLElement>('.stories-card')!;
+const storiesProjectLabel = document.querySelector<HTMLParagraphElement>('#stories-project-label')!;
+const storyForm = document.querySelector<HTMLFormElement>('#story-form')!;
+const storyIdInput = document.querySelector<HTMLInputElement>('#story-id')!;
+const storyNameInput = document.querySelector<HTMLInputElement>('#story-name')!;
+const storyDescriptionInput = document.querySelector<HTMLTextAreaElement>('#story-description')!;
+const storyPrioritySelect = document.querySelector<HTMLSelectElement>('#story-priority')!;
+const storyStateSelect = document.querySelector<HTMLSelectElement>('#story-state')!;
+const storySaveBtn = document.querySelector<HTMLButtonElement>('#story-save-btn')!;
+const storyCancelBtn = document.querySelector<HTMLButtonElement>('#story-cancel-btn')!;
+const storiesEmpty = document.querySelector<HTMLDivElement>('#stories-empty')!;
+const storiesList = document.querySelector<HTMLUListElement>('#stories-list')!;
 const storiesFilterButtons = Array.from(
   document.querySelectorAll<HTMLButtonElement>('.stories-filter-btn'),
 );
@@ -192,12 +280,47 @@ if (
   throw new Error('ManageMe UI elements not found');
 }
 
-userNameLabel.textContent = `${currentUser.firstName} ${currentUser.lastName}`;
+userNameLabel.textContent = `${currentUser.firstName} ${currentUser.lastName} [${currentUser.role}]`;
+
+// Tasks elements
+const tasksCardLabel = document.querySelector<HTMLParagraphElement>('#tasks-story-label')!;
+const addTaskBtn = document.querySelector<HTMLButtonElement>('#add-task-btn')!;
+const kanbanBoard = document.querySelector<HTMLDivElement>('#kanban-board')!;
+const kanbanTodo = document.querySelector<HTMLDivElement>('#kanban-todo')!;
+const kanbanDoing = document.querySelector<HTMLDivElement>('#kanban-doing')!;
+const kanbanDone = document.querySelector<HTMLDivElement>('#kanban-done')!;
+const taskModal = document.querySelector<HTMLDivElement>('#task-modal')!;
+const taskModalCloseBtn = document.querySelector<HTMLButtonElement>('#task-modal-close')!;
+const taskForm = document.querySelector<HTMLFormElement>('#task-form')!;
+const taskIdInput = document.querySelector<HTMLInputElement>('#task-id')!;
+const taskNameInput = document.querySelector<HTMLInputElement>('#task-name')!;
+const taskPrioritySelect = document.querySelector<HTMLSelectElement>('#task-priority')!;
+const taskHoursInput = document.querySelector<HTMLInputElement>('#task-hours')!;
+const taskAssigneeField = document.querySelector<HTMLDivElement>('#task-assignee-field')!;
+const taskAssigneeSelect = document.querySelector<HTMLSelectElement>('#task-assignee')!;
+const taskDescriptionInput = document.querySelector<HTMLTextAreaElement>('#task-description')!;
+const taskStats = document.querySelector<HTMLDivElement>('#task-stats')!;
+const taskStateLabel = document.querySelector<HTMLSpanElement>('#task-state-label')!;
+const taskAssigneeLabel = document.querySelector<HTMLSpanElement>('#task-assignee-label')!;
+const taskCreatedAtLabel = document.querySelector<HTMLSpanElement>('#task-created-at')!;
+const taskStartedContainer = document.querySelector<HTMLParagraphElement>('#task-started-container')!;
+const taskStartedAtLabel = document.querySelector<HTMLSpanElement>('#task-started-at')!;
+const taskFinishedContainer = document.querySelector<HTMLParagraphElement>('#task-finished-container')!;
+const taskFinishedAtLabel = document.querySelector<HTMLSpanElement>('#task-finished-at')!;
+const taskSaveBtn = document.querySelector<HTMLButtonElement>('#task-save-btn')!;
+const taskDeleteBtn = document.querySelector<HTMLButtonElement>('#task-delete-btn')!;
+const taskStartBtn = document.querySelector<HTMLButtonElement>('#task-start-btn')!;
+const taskDoneBtn = document.querySelector<HTMLButtonElement>('#task-done-btn')!;
+
+if (!tasksCardLabel || !addTaskBtn || !kanbanBoard || !kanbanTodo || !kanbanDoing || !kanbanDone || !taskModal || !taskModalCloseBtn || !taskForm || !taskIdInput || !taskNameInput || !taskPrioritySelect || !taskHoursInput || !taskAssigneeField || !taskAssigneeSelect || !taskDescriptionInput || !taskStats || !taskStateLabel || !taskAssigneeLabel || !taskCreatedAtLabel || !taskStartedContainer || !taskStartedAtLabel || !taskFinishedContainer || !taskFinishedAtLabel || !taskSaveBtn || !taskDeleteBtn || !taskStartBtn || !taskDoneBtn) {
+  throw new Error('ManageMe Tasks UI elements not found');
+}
 
 type StoriesFilter = 'all' | StoryState;
 
 let activeProjectId: string | null = getActiveProjectId();
 let activeStoriesFilter: StoriesFilter = 'all';
+let activeStoryId: string | null = null;
 
 function setProjectEditing(project: Project | null): void {
   if (!project) {
@@ -277,9 +400,8 @@ function renderProjects(): void {
         <p>${project.description || '<brak opisu>'}</p>
       </div>
       <div class="project-actions">
-        <button type="button" class="btn small" data-action="set-active">${
-          activeProjectId === project.id ? 'Aktywny' : 'Ustaw jako aktywny'
-        }</button>
+        <button type="button" class="btn small" data-action="set-active">${activeProjectId === project.id ? 'Aktywny' : 'Ustaw jako aktywny'
+      }</button>
         <button type="button" class="btn small" data-action="edit">Edytuj</button>
         <button type="button" class="btn small danger" data-action="delete">Usuń</button>
       </div>
@@ -390,6 +512,7 @@ function renderStories(): void {
         </p>
       </div>
       <div class="story-actions">
+        <button type="button" class="btn small primary" data-action="story-active">Pokaż zadania</button>
         <button type="button" class="btn small" data-action="story-edit">Edytuj</button>
         <button type="button" class="btn small danger" data-action="story-delete">Usuń</button>
       </div>
@@ -519,6 +642,11 @@ storiesList.addEventListener('click', (event) => {
 
   const id = item.dataset.id;
 
+  if (action === 'story-active') {
+    activeStoryId = id;
+    renderTasks();
+  }
+
   if (action === 'story-edit') {
     if (!activeProjectId) return;
     const stories = getStoriesByProject(activeProjectId);
@@ -551,3 +679,219 @@ storiesFilterButtons.forEach((btn) => {
 cancelEditBtn.disabled = true;
 storiesFilterButtons[0]?.classList.add('stories-filter-btn--active');
 renderProjects();
+
+// Tasks Logic
+function renderTasks(): void {
+  if (!activeStoryId) {
+    tasksCardLabel.textContent = 'Wybierz historyjkę, aby zarządzać zadaniami.';
+    addTaskBtn.disabled = true;
+    kanbanBoard.style.display = 'none';
+    return;
+  }
+
+  const stories = getStoriesByProject(activeProjectId!);
+  const story = stories.find(s => s.id === activeStoryId);
+
+  if (!story) {
+    activeStoryId = null;
+    renderTasks();
+    return;
+  }
+
+  tasksCardLabel.textContent = `Zadania dla: ${story.name}`;
+  addTaskBtn.disabled = false;
+  kanbanBoard.style.display = 'flex';
+
+  const tasks = getTasksByStory(activeStoryId);
+  kanbanTodo.innerHTML = '';
+  kanbanDoing.innerHTML = '';
+  kanbanDone.innerHTML = '';
+
+  tasks.forEach(task => {
+    const div = document.createElement('div');
+    div.className = 'task-item';
+    div.dataset.id = task.id;
+
+    let assigneeName = 'Brak';
+    if (task.assigneeId) {
+      const u = getUsers().find(x => x.id === task.assigneeId);
+      if (u) assigneeName = `${u.firstName} ${u.lastName}`;
+    }
+
+    div.innerHTML = `
+      <div class="task-title">${task.name}</div>
+      <div class="task-meta">
+        <span>Czas: ${task.estimatedHours}h</span>
+        <span>Priorytet: ${task.priority}</span>
+      </div>
+      <div class="task-meta">
+        <span>${assigneeName}</span>
+      </div>
+    `;
+
+    if (task.state === 'todo') kanbanTodo.appendChild(div);
+    else if (task.state === 'doing') kanbanDoing.appendChild(div);
+    else if (task.state === 'done') kanbanDone.appendChild(div);
+  });
+}
+
+function openTaskModal(task: Task | null): void {
+  taskAssigneeSelect.innerHTML = '<option value="">Wybierz...</option>';
+  const eligibleUsers = getUsers().filter(u => u.role === 'devops' || u.role === 'developer');
+  eligibleUsers.forEach(u => {
+    const opt = document.createElement('option');
+    opt.value = u.id;
+    opt.textContent = `${u.firstName} ${u.lastName} (${u.role})`;
+    taskAssigneeSelect.appendChild(opt);
+  });
+
+  if (!task) {
+    taskIdInput.value = '';
+    taskNameInput.value = '';
+    taskDescriptionInput.value = '';
+    taskPrioritySelect.value = 'medium';
+    taskHoursInput.value = '1';
+    taskAssigneeField.style.display = 'none';
+    taskAssigneeSelect.value = '';
+
+    taskStats.style.display = 'none';
+    taskDeleteBtn.style.display = 'none';
+    taskStartBtn.style.display = 'none';
+    taskDoneBtn.style.display = 'none';
+    taskSaveBtn.textContent = 'Zapisz zadanie';
+  } else {
+    taskIdInput.value = task.id;
+    taskNameInput.value = task.name;
+    taskDescriptionInput.value = task.description || '';
+    taskPrioritySelect.value = task.priority;
+    taskHoursInput.value = task.estimatedHours.toString();
+
+    taskStats.style.display = 'block';
+    taskStateLabel.textContent = task.state;
+    taskCreatedAtLabel.textContent = formatDate(task.createdAt);
+
+    if (task.startedAt) {
+      taskStartedContainer.style.display = 'block';
+      taskStartedAtLabel.textContent = formatDate(task.startedAt);
+    } else {
+      taskStartedContainer.style.display = 'none';
+    }
+
+    if (task.finishedAt) {
+      taskFinishedContainer.style.display = 'block';
+      taskFinishedAtLabel.textContent = formatDate(task.finishedAt);
+    } else {
+      taskFinishedContainer.style.display = 'none';
+    }
+
+    if (task.assigneeId) {
+      const u = getUsers().find(x => x.id === task.assigneeId);
+      taskAssigneeLabel.textContent = u ? `${u.firstName} ${u.lastName}` : task.assigneeId;
+    } else {
+      taskAssigneeLabel.textContent = 'Brak';
+    }
+
+    taskDeleteBtn.style.display = 'inline-flex';
+    taskSaveBtn.textContent = 'Zapisz zmiany';
+
+    if (task.state === 'todo') {
+      taskAssigneeField.style.display = 'flex';
+      taskStartBtn.style.display = 'inline-flex';
+      taskDoneBtn.style.display = 'none';
+    } else if (task.state === 'doing') {
+      taskAssigneeField.style.display = 'none';
+      taskStartBtn.style.display = 'none';
+      taskDoneBtn.style.display = 'inline-flex';
+    } else {
+      taskAssigneeField.style.display = 'none';
+      taskStartBtn.style.display = 'none';
+      taskDoneBtn.style.display = 'none';
+    }
+  }
+
+  taskModal.classList.remove('hidden');
+}
+
+function closeTaskModal(): void {
+  taskModal.classList.add('hidden');
+}
+
+taskModalCloseBtn.addEventListener('click', closeTaskModal);
+addTaskBtn.addEventListener('click', () => openTaskModal(null));
+
+taskForm.addEventListener('submit', (e) => {
+  e.preventDefault();
+  if (!activeStoryId) return;
+
+  const id = taskIdInput.value;
+  const name = taskNameInput.value.trim();
+  const description = taskDescriptionInput.value.trim();
+  const priority = taskPrioritySelect.value as TaskPriority;
+  const estimatedHours = parseFloat(taskHoursInput.value) || 0;
+
+  if (!name) return;
+
+  if (id) {
+    updateTask(id, { name, description, priority, estimatedHours });
+  } else {
+    createTask({
+      name, description, priority, estimatedHours,
+      storyId: activeStoryId,
+      state: 'todo',
+    });
+  }
+
+  closeTaskModal();
+  renderTasks();
+  renderStories();
+});
+
+taskDeleteBtn.addEventListener('click', () => {
+  const id = taskIdInput.value;
+  if (!id) return;
+  if (confirm('Usunąć zadanie?')) {
+    deleteTask(id);
+    closeTaskModal();
+    renderTasks();
+    renderStories();
+  }
+});
+
+taskStartBtn.addEventListener('click', () => {
+  const id = taskIdInput.value;
+  const assigneeId = taskAssigneeSelect.value;
+  if (!id || !assigneeId) {
+    alert('Wybierz pracownika aby rozpocząć zadanie!');
+    return;
+  }
+  updateTask(id, {
+    state: 'doing',
+    assigneeId: assigneeId,
+    startedAt: new Date().toISOString()
+  });
+  closeTaskModal();
+  renderTasks();
+  renderStories();
+});
+
+taskDoneBtn.addEventListener('click', () => {
+  const id = taskIdInput.value;
+  if (!id) return;
+  updateTask(id, {
+    state: 'done',
+    finishedAt: new Date().toISOString()
+  });
+  closeTaskModal();
+  renderTasks();
+  renderStories();
+});
+
+kanbanBoard.addEventListener('click', (e) => {
+  const target = e.target as HTMLElement;
+  const item = target.closest<HTMLDivElement>('.task-item');
+  if (item && item.dataset.id) {
+    const tasks = getTasksByStory(activeStoryId!);
+    const task = tasks.find(t => t.id === item.dataset.id) || null;
+    if (task) openTaskModal(task);
+  }
+});
