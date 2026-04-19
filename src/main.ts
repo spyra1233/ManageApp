@@ -1,4 +1,7 @@
+import 'bootstrap/dist/css/bootstrap.min.css';
 import './style.css';
+import * as bootstrap from 'bootstrap';
+
 import type { Project, Story, StoryPriority, StoryState, User, Task, TaskPriority } from './types';
 import {
   createProject,
@@ -18,6 +21,14 @@ import {
   deleteTask,
   getUsers,
 } from './storage';
+import {
+  applyDocumentTheme,
+  getStoredTheme,
+  initThemeListeners,
+  setStoredTheme,
+  updateThemeToggleLabel,
+  type ThemePreference,
+} from './theme';
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -28,199 +39,226 @@ if (!app) {
 const currentUser: User = getCurrentUser();
 
 app.innerHTML = `
-  <div class="page">
-    <header class="page-header">
+  <div class="container py-4">
+    <header class="mb-4 d-flex flex-wrap justify-content-between align-items-start gap-3">
       <div>
-        <h1>ManageMe</h1>
-        <p class="subtitle">Proste zarządzanie projektami, historyjkami i aktywnym kontekstem.</p>
+        <h1 class="h2 mb-1">ManageMe</h1>
+        <p class="text-body-secondary mb-0 small">Proste zarządzanie projektami, historyjkami i aktywnym kontekstem.</p>
       </div>
-      <div class="user-badge">
-        <span class="user-label">Zalogowany użytkownik</span>
-        <span class="user-name" id="user-name"></span>
+      <div class="d-flex flex-wrap align-items-center gap-2 justify-content-end">
+        <div class="dropdown">
+          <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" data-bs-toggle="dropdown" data-bs-auto-close="true" aria-expanded="false" id="theme-menu-btn" aria-label="Wybierz motyw">
+            <span id="theme-toggle-label">Motyw</span>
+          </button>
+          <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="theme-menu-btn">
+            <li><button type="button" class="dropdown-item" data-theme-pref="light">Jasny</button></li>
+            <li><button type="button" class="dropdown-item" data-theme-pref="dark">Ciemny</button></li>
+            <li><hr class="dropdown-divider" /></li>
+            <li><button type="button" class="dropdown-item" data-theme-pref="system">Zgodnie z systemem</button></li>
+          </ul>
+        </div>
+        <div class="text-end border-start ps-3 ms-1">
+          <div class="text-body-secondary text-uppercase small" style="font-size: 0.65rem; letter-spacing: 0.08em;">Zalogowany</div>
+          <span class="badge rounded-pill text-bg-secondary mt-1" id="user-name"></span>
+        </div>
       </div>
     </header>
 
-    <main class="layout">
-      <section class="card">
-        <h2>Projekt</h2>
-        <form id="project-form" class="form">
-          <input type="hidden" id="project-id" />
-
-          <label class="field">
-            <span>Nazwa projektu</span>
-            <input id="project-name" type="text" placeholder="Np. Aplikacja CRM" required />
-          </label>
-
-          <label class="field">
-            <span>Opis</span>
-            <textarea id="project-description" rows="4" placeholder="Krótki opis celu projektu"></textarea>
-          </label>
-
-          <div class="form-actions">
-            <button type="submit" class="btn primary" id="save-btn">Zapisz</button>
-            <button type="button" class="btn ghost" id="cancel-edit-btn">Anuluj edycję</button>
+    <div class="row g-4">
+      <div class="col-12 col-lg-5">
+        <div class="card shadow-sm h-100">
+          <div class="card-header py-3">
+            <h2 class="h5 mb-0">Projekt</h2>
           </div>
-        </form>
-      </section>
+          <div class="card-body">
+            <form id="project-form" class="d-flex flex-column gap-3">
+              <input type="hidden" id="project-id" />
 
-      <section class="card">
-        <header class="card-header">
-          <div>
-            <h2>Lista projektów</h2>
-            <p class="card-subtitle">Wybierz aktywny projekt, aby pracować na jego historyjkach.</p>
-          </div>
-          <div class="card-header-right">
-            <span class="chip" id="projects-count">0 projektów</span>
-          </div>
-        </header>
-        <div id="projects-empty" class="empty">
-          Brak projektów. Dodaj pierwszy projekt w formularzu obok.
-        </div>
-        <ul id="projects-list" class="projects-list"></ul>
-      </section>
+              <div>
+                <label class="form-label" for="project-name">Nazwa projektu</label>
+                <input class="form-control" id="project-name" type="text" placeholder="Np. Aplikacja CRM" required />
+              </div>
 
-      <section class="card stories-card">
-        <header class="card-header">
-          <div>
-            <h2>Historyjki projektu</h2>
-            <p class="card-subtitle" id="stories-project-label">Brak aktywnego projektu.</p>
-          </div>
-          <div class="stories-filters">
-            <button class="btn small stories-filter-btn" data-filter="all">Wszystkie</button>
-            <button class="btn small stories-filter-btn" data-filter="todo">Do zrobienia</button>
-            <button class="btn small stories-filter-btn" data-filter="doing">W toku</button>
-            <button class="btn small stories-filter-btn" data-filter="done">Zamknięte</button>
-          </div>
-        </header>
+              <div>
+                <label class="form-label" for="project-description">Opis</label>
+                <textarea class="form-control" id="project-description" rows="4" placeholder="Krótki opis celu projektu"></textarea>
+              </div>
 
-        <form id="story-form" class="form stories-form">
-          <input type="hidden" id="story-id" />
-
-          <div class="stories-form-grid">
-            <label class="field">
-              <span>Tytuł</span>
-              <input id="story-name" type="text" placeholder="Krótki tytuł historyjki" required />
-            </label>
-
-            <label class="field">
-              <span>Priorytet</span>
-              <select id="story-priority">
-                <option value="low">Niski</option>
-                <option value="medium" selected>Średni</option>
-                <option value="high">Wysoki</option>
-              </select>
-            </label>
-
-            <label class="field">
-              <span>Status</span>
-              <select id="story-state">
-                <option value="todo">Do zrobienia</option>
-                <option value="doing">W toku</option>
-                <option value="done">Zamknięte</option>
-              </select>
-            </label>
-          </div>
-
-          <label class="field">
-            <span>Opis</span>
-            <textarea id="story-description" rows="3" placeholder="Szczegóły funkcjonalności"></textarea>
-          </label>
-
-          <div class="form-actions">
-            <button type="submit" class="btn primary" id="story-save-btn">Zapisz historyjkę</button>
-            <button type="button" class="btn ghost" id="story-cancel-btn">Wyczyść formularz</button>
-          </div>
-        </form>
-
-        <div id="stories-empty" class="empty">
-          Brak historyjek dla aktywnego projektu.
-        </div>
-
-        <ul id="stories-list" class="stories-list"></ul>
-      </section>
-
-      <section class="card tasks-card">
-        <header class="card-header">
-          <div>
-            <h2>Tablica Zadań</h2>
-            <p class="card-subtitle" id="tasks-story-label">Wybierz historyjkę, aby zarządzać zadaniami.</p>
-          </div>
-          <div class="card-header-right">
-            <button type="button" class="btn small primary" id="add-task-btn" disabled>Dodaj zadanie</button>
-          </div>
-        </header>
-        <div class="kanban-board" id="kanban-board" style="display: none;">
-          <div class="kanban-column">
-            <h3>Do zrobienia</h3>
-            <div class="kanban-list" id="kanban-todo" data-state="todo"></div>
-          </div>
-          <div class="kanban-column">
-            <h3>W toku</h3>
-            <div class="kanban-list" id="kanban-doing" data-state="doing"></div>
-          </div>
-          <div class="kanban-column">
-            <h3>Zamknięte</h3>
-            <div class="kanban-list" id="kanban-done" data-state="done"></div>
+              <div class="d-flex flex-wrap justify-content-end gap-2 pt-1">
+                <button type="submit" class="btn btn-primary" id="save-btn">Zapisz</button>
+                <button type="button" class="btn btn-outline-secondary" id="cancel-edit-btn">Anuluj edycję</button>
+              </div>
+            </form>
           </div>
         </div>
-      </section>
-    </main>
+      </div>
+
+      <div class="col-12 col-lg-7">
+        <div class="card shadow-sm h-100">
+          <div class="card-header py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+              <h2 class="h5 mb-0">Lista projektów</h2>
+              <p class="text-body-secondary small mb-0 mt-1">Wybierz aktywny projekt, aby pracować na jego historyjkach.</p>
+            </div>
+            <span class="badge rounded-pill text-bg-secondary" id="projects-count">0 projektów</span>
+          </div>
+          <div class="card-body">
+            <div id="projects-empty" class="alert alert-secondary mb-0 py-3" role="status">
+              Brak projektów. Dodaj pierwszy projekt w formularzu obok.
+            </div>
+            <ul id="projects-list" class="list-group list-group-flush projects-list"></ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12">
+        <div class="card shadow-sm stories-card">
+          <div class="card-header py-3 d-flex flex-wrap justify-content-between align-items-start gap-3">
+            <div>
+              <h2 class="h5 mb-0">Historyjki projektu</h2>
+              <p class="text-body-secondary small mb-0 mt-1" id="stories-project-label">Brak aktywnego projektu.</p>
+            </div>
+            <div class="btn-group btn-group-sm flex-wrap" role="group" aria-label="Filtr historyjek">
+              <button type="button" class="btn btn-outline-primary stories-filter-btn" data-filter="all">Wszystkie</button>
+              <button type="button" class="btn btn-outline-primary stories-filter-btn" data-filter="todo">Do zrobienia</button>
+              <button type="button" class="btn btn-outline-primary stories-filter-btn" data-filter="doing">W toku</button>
+              <button type="button" class="btn btn-outline-primary stories-filter-btn" data-filter="done">Zamknięte</button>
+            </div>
+          </div>
+          <div class="card-body">
+            <form id="story-form" class="d-flex flex-column gap-3 mb-3 stories-form">
+              <input type="hidden" id="story-id" />
+
+              <div class="row g-3 stories-form-grid">
+                <div class="col-12 col-md-6">
+                  <label class="form-label" for="story-name">Tytuł</label>
+                  <input class="form-control" id="story-name" type="text" placeholder="Krótki tytuł historyjki" required />
+                </div>
+                <div class="col-12 col-md-3">
+                  <label class="form-label" for="story-priority">Priorytet</label>
+                  <select class="form-select" id="story-priority">
+                    <option value="low">Niski</option>
+                    <option value="medium" selected>Średni</option>
+                    <option value="high">Wysoki</option>
+                  </select>
+                </div>
+                <div class="col-12 col-md-3">
+                  <label class="form-label" for="story-state">Status</label>
+                  <select class="form-select" id="story-state">
+                    <option value="todo">Do zrobienia</option>
+                    <option value="doing">W toku</option>
+                    <option value="done">Zamknięte</option>
+                  </select>
+                </div>
+              </div>
+
+              <div>
+                <label class="form-label" for="story-description">Opis</label>
+                <textarea class="form-control" id="story-description" rows="3" placeholder="Szczegóły funkcjonalności"></textarea>
+              </div>
+
+              <div class="d-flex flex-wrap justify-content-end gap-2">
+                <button type="submit" class="btn btn-primary" id="story-save-btn">Zapisz historyjkę</button>
+                <button type="button" class="btn btn-outline-secondary" id="story-cancel-btn">Wyczyść formularz</button>
+              </div>
+            </form>
+
+            <div id="stories-empty" class="alert alert-secondary mb-0 py-3" role="status">
+              Brak historyjek dla aktywnego projektu.
+            </div>
+
+            <ul id="stories-list" class="list-group list-group-flush stories-list mt-2"></ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="col-12">
+        <div class="card shadow-sm tasks-card">
+          <div class="card-header py-3 d-flex flex-wrap justify-content-between align-items-center gap-2">
+            <div>
+              <h2 class="h5 mb-0">Tablica zadań</h2>
+              <p class="text-body-secondary small mb-0 mt-1" id="tasks-story-label">Wybierz historyjkę, aby zarządzać zadaniami.</p>
+            </div>
+            <button type="button" class="btn btn-sm btn-primary" id="add-task-btn" disabled>Dodaj zadanie</button>
+          </div>
+          <div class="card-body">
+            <div class="kanban-board d-none flex-column flex-md-row" id="kanban-board">
+              <div class="kanban-column flex-fill border rounded overflow-hidden">
+                <h3 class="h6 mb-0 px-3 py-2 bg-body-secondary border-bottom">Do zrobienia</h3>
+                <div class="kanban-list p-2" id="kanban-todo" data-state="todo"></div>
+              </div>
+              <div class="kanban-column flex-fill border rounded overflow-hidden">
+                <h3 class="h6 mb-0 px-3 py-2 bg-body-secondary border-bottom">W toku</h3>
+                <div class="kanban-list p-2" id="kanban-doing" data-state="doing"></div>
+              </div>
+              <div class="kanban-column flex-fill border rounded overflow-hidden">
+                <h3 class="h6 mb-0 px-3 py-2 bg-body-secondary border-bottom">Zamknięte</h3>
+                <div class="kanban-list p-2" id="kanban-done" data-state="done"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
   </div>
 
-  <div class="modal hidden" id="task-modal">
-    <div class="modal-content">
-      <header class="modal-header">
-        <h2 id="task-modal-title">Zadanie</h2>
-        <button type="button" class="btn clean" id="task-modal-close">&times;</button>
-      </header>
-      <form id="task-form" class="form">
-        <input type="hidden" id="task-id" />
-        
-        <div class="stories-form-grid">
-          <label class="field">
-            <span>Nazwa zadania</span>
-            <input id="task-name" type="text" placeholder="Krótka nazwa" required />
-          </label>
-          <label class="field">
-            <span>Priorytet</span>
-            <select id="task-priority">
-              <option value="low">Niski</option>
-              <option value="medium" selected>Średni</option>
-              <option value="high">Wysoki</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Czas (godziny)</span>
-            <input id="task-hours" type="number" min="0" step="0.5" value="1" required />
-          </label>
-          <label class="field" id="task-assignee-field" style="display: none;">
-            <span>Przypisz pracownika</span>
-            <select id="task-assignee">
-               <option value="">Wybierz...</option>
-            </select>
-          </label>
-        </div>
+  <div class="modal fade" id="task-modal" tabindex="-1" aria-labelledby="task-modal-title" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
+      <div class="modal-content">
+        <form id="task-form">
+          <div class="modal-header">
+            <h2 class="modal-title fs-5" id="task-modal-title">Zadanie</h2>
+            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Zamknij" id="task-modal-close"></button>
+          </div>
+          <div class="modal-body">
+            <input type="hidden" id="task-id" />
 
-        <label class="field">
-          <span>Opis</span>
-          <textarea id="task-description" rows="3" placeholder="Szczegóły..."></textarea>
-        </label>
-        
-        <div class="task-stats" id="task-stats" style="display: none;">
-           <p><strong>Stan:</strong> <span id="task-state-label"></span></p>
-           <p><strong>Przypisano:</strong> <span id="task-assignee-label"></span></p>
-           <p><strong>Dodano:</strong> <span id="task-created-at"></span></p>
-           <p id="task-started-container" style="display:none;"><strong>Start:</strong> <span id="task-started-at"></span></p>
-           <p id="task-finished-container" style="display:none;"><strong>Koniec:</strong> <span id="task-finished-at"></span></p>
-        </div>
+            <div class="row g-3">
+              <div class="col-12 col-md-6">
+                <label class="form-label" for="task-name">Nazwa zadania</label>
+                <input class="form-control" id="task-name" type="text" placeholder="Krótka nazwa" required />
+              </div>
+              <div class="col-12 col-md-3">
+                <label class="form-label" for="task-priority">Priorytet</label>
+                <select class="form-select" id="task-priority">
+                  <option value="low">Niski</option>
+                  <option value="medium" selected>Średni</option>
+                  <option value="high">Wysoki</option>
+                </select>
+              </div>
+              <div class="col-12 col-md-3">
+                <label class="form-label" for="task-hours">Czas (godziny)</label>
+                <input class="form-control" id="task-hours" type="number" min="0" step="0.5" value="1" required />
+              </div>
+              <div class="col-12 col-md-6 d-none" id="task-assignee-field">
+                <label class="form-label" for="task-assignee">Przypisz pracownika</label>
+                <select class="form-select" id="task-assignee">
+                  <option value="">Wybierz...</option>
+                </select>
+              </div>
+            </div>
 
-        <div class="form-actions" id="task-form-actions">
-           <button type="submit" class="btn primary" id="task-save-btn">Zapisz zadanie</button>
-           <button type="button" class="btn danger" id="task-delete-btn" style="display: none;">Usuń</button>
-           <button type="button" class="btn primary" id="task-start-btn" style="display: none;">Rozpocznij</button>
-           <button type="button" class="btn success" id="task-done-btn" style="display: none;">Zakończ</button>
-        </div>
-      </form>
+            <div class="mt-3">
+              <label class="form-label" for="task-description">Opis</label>
+              <textarea class="form-control" id="task-description" rows="3" placeholder="Szczegóły..."></textarea>
+            </div>
+
+            <div class="task-stats border rounded p-3 mt-3 bg-body-secondary d-none" id="task-stats">
+              <p class="mb-1 small"><strong>Stan:</strong> <span id="task-state-label"></span></p>
+              <p class="mb-1 small"><strong>Przypisano:</strong> <span id="task-assignee-label"></span></p>
+              <p class="mb-1 small"><strong>Dodano:</strong> <span id="task-created-at"></span></p>
+              <p class="mb-0 small d-none" id="task-started-container"><strong>Start:</strong> <span id="task-started-at"></span></p>
+              <p class="mb-0 small d-none" id="task-finished-container"><strong>Koniec:</strong> <span id="task-finished-at"></span></p>
+            </div>
+          </div>
+          <div class="modal-footer flex-wrap gap-2" id="task-form-actions">
+            <button type="submit" class="btn btn-primary" id="task-save-btn">Zapisz zadanie</button>
+            <button type="button" class="btn btn-outline-danger d-none" id="task-delete-btn">Usuń</button>
+            <button type="button" class="btn btn-outline-primary d-none" id="task-start-btn">Rozpocznij</button>
+            <button type="button" class="btn btn-success d-none" id="task-done-btn">Zakończ</button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
 `;
@@ -236,7 +274,6 @@ const projectsEmpty = document.querySelector<HTMLDivElement>('#projects-empty')!
 const projectsCount = document.querySelector<HTMLSpanElement>('#projects-count')!;
 const saveBtn = document.querySelector<HTMLButtonElement>('#save-btn')!;
 
-// Story elements
 const storiesCard = document.querySelector<HTMLElement>('.stories-card')!;
 const storiesProjectLabel = document.querySelector<HTMLParagraphElement>('#stories-project-label')!;
 const storyForm = document.querySelector<HTMLFormElement>('#story-form')!;
@@ -252,6 +289,8 @@ const storiesList = document.querySelector<HTMLUListElement>('#stories-list')!;
 const storiesFilterButtons = Array.from(
   document.querySelectorAll<HTMLButtonElement>('.stories-filter-btn'),
 );
+
+const themeToggleLabel = document.querySelector<HTMLSpanElement>('#theme-toggle-label')!;
 
 if (
   !userNameLabel ||
@@ -275,21 +314,21 @@ if (
   !storySaveBtn ||
   !storyCancelBtn ||
   !storiesEmpty ||
-  !storiesList
+  !storiesList ||
+  !themeToggleLabel
 ) {
   throw new Error('ManageMe UI elements not found');
 }
 
-userNameLabel.textContent = `${currentUser.firstName} ${currentUser.lastName} [${currentUser.role}]`;
+const taskModalEl = document.querySelector<HTMLDivElement>('#task-modal')!;
+const bsTaskModal = new bootstrap.Modal(taskModalEl);
 
-// Tasks elements
 const tasksCardLabel = document.querySelector<HTMLParagraphElement>('#tasks-story-label')!;
 const addTaskBtn = document.querySelector<HTMLButtonElement>('#add-task-btn')!;
 const kanbanBoard = document.querySelector<HTMLDivElement>('#kanban-board')!;
 const kanbanTodo = document.querySelector<HTMLDivElement>('#kanban-todo')!;
 const kanbanDoing = document.querySelector<HTMLDivElement>('#kanban-doing')!;
 const kanbanDone = document.querySelector<HTMLDivElement>('#kanban-done')!;
-const taskModal = document.querySelector<HTMLDivElement>('#task-modal')!;
 const taskModalCloseBtn = document.querySelector<HTMLButtonElement>('#task-modal-close')!;
 const taskForm = document.querySelector<HTMLFormElement>('#task-form')!;
 const taskIdInput = document.querySelector<HTMLInputElement>('#task-id')!;
@@ -312,15 +351,76 @@ const taskDeleteBtn = document.querySelector<HTMLButtonElement>('#task-delete-bt
 const taskStartBtn = document.querySelector<HTMLButtonElement>('#task-start-btn')!;
 const taskDoneBtn = document.querySelector<HTMLButtonElement>('#task-done-btn')!;
 
-if (!tasksCardLabel || !addTaskBtn || !kanbanBoard || !kanbanTodo || !kanbanDoing || !kanbanDone || !taskModal || !taskModalCloseBtn || !taskForm || !taskIdInput || !taskNameInput || !taskPrioritySelect || !taskHoursInput || !taskAssigneeField || !taskAssigneeSelect || !taskDescriptionInput || !taskStats || !taskStateLabel || !taskAssigneeLabel || !taskCreatedAtLabel || !taskStartedContainer || !taskStartedAtLabel || !taskFinishedContainer || !taskFinishedAtLabel || !taskSaveBtn || !taskDeleteBtn || !taskStartBtn || !taskDoneBtn) {
+if (
+  !tasksCardLabel ||
+  !addTaskBtn ||
+  !kanbanBoard ||
+  !kanbanTodo ||
+  !kanbanDoing ||
+  !kanbanDone ||
+  !taskModalCloseBtn ||
+  !taskForm ||
+  !taskIdInput ||
+  !taskNameInput ||
+  !taskPrioritySelect ||
+  !taskHoursInput ||
+  !taskAssigneeField ||
+  !taskAssigneeSelect ||
+  !taskDescriptionInput ||
+  !taskStats ||
+  !taskStateLabel ||
+  !taskAssigneeLabel ||
+  !taskCreatedAtLabel ||
+  !taskStartedContainer ||
+  !taskStartedAtLabel ||
+  !taskFinishedContainer ||
+  !taskFinishedAtLabel ||
+  !taskSaveBtn ||
+  !taskDeleteBtn ||
+  !taskStartBtn ||
+  !taskDoneBtn
+) {
   throw new Error('ManageMe Tasks UI elements not found');
 }
+
+function syncThemeUi(): void {
+  const pref = getStoredTheme();
+  applyDocumentTheme(pref);
+  updateThemeToggleLabel(themeToggleLabel, pref);
+}
+
+syncThemeUi();
+initThemeListeners(syncThemeUi);
+
+document.querySelectorAll<HTMLButtonElement>('[data-theme-pref]').forEach((btn) => {
+  btn.addEventListener('click', () => {
+    const raw = btn.dataset.themePref;
+    if (raw === 'light' || raw === 'dark' || raw === 'system') {
+      setStoredTheme(raw as ThemePreference);
+      syncThemeUi();
+    }
+  });
+});
+
+userNameLabel.textContent = `${currentUser.firstName} ${currentUser.lastName} [${currentUser.role}]`;
 
 type StoriesFilter = 'all' | StoryState;
 
 let activeProjectId: string | null = getActiveProjectId();
 let activeStoriesFilter: StoriesFilter = 'all';
 let activeStoryId: string | null = null;
+
+function storyPriorityBadgeClass(priority: StoryPriority): string {
+  if (priority === 'high') return 'text-bg-danger';
+  if (priority === 'medium') return 'text-bg-warning';
+  return 'text-bg-success';
+}
+
+function storyStateBadgeClass(state: StoryState): string {
+  if (state === 'done') return 'text-bg-success';
+  if (state === 'doing') return 'text-bg-primary';
+  return 'text-bg-secondary';
+}
 
 function setProjectEditing(project: Project | null): void {
   if (!project) {
@@ -375,11 +475,11 @@ function renderProjects(): void {
   projectsList.innerHTML = '';
 
   if (projects.length === 0) {
-    projectsEmpty.style.display = 'block';
+    projectsEmpty.classList.remove('d-none');
     activeProjectId = null;
     setActiveProjectId(null);
   } else {
-    projectsEmpty.style.display = 'none';
+    projectsEmpty.classList.add('d-none');
   }
 
   if (projects.length > 0 && (!activeProjectId || !projects.some((p) => p.id === activeProjectId))) {
@@ -391,25 +491,27 @@ function renderProjects(): void {
 
   for (const project of projects) {
     const li = document.createElement('li');
-    li.className = 'project-item';
+    li.className = 'list-group-item list-group-item-action project-item';
     li.dataset.id = project.id;
 
+    const isActive = activeProjectId === project.id;
+    if (isActive) {
+      li.classList.add('active');
+    }
+
     li.innerHTML = `
-      <div class="project-main">
-        <h3>${project.name || 'Bez nazwy'}</h3>
-        <p>${project.description || '<brak opisu>'}</p>
-      </div>
-      <div class="project-actions">
-        <button type="button" class="btn small" data-action="set-active">${activeProjectId === project.id ? 'Aktywny' : 'Ustaw jako aktywny'
-      }</button>
-        <button type="button" class="btn small" data-action="edit">Edytuj</button>
-        <button type="button" class="btn small danger" data-action="delete">Usuń</button>
+      <div class="d-flex flex-column flex-md-row justify-content-between align-items-start gap-2">
+        <div class="flex-grow-1">
+          <h3 class="h6 mb-1">${project.name || 'Bez nazwy'}</h3>
+          <p class="small text-body-secondary mb-0">${project.description || '<brak opisu>'}</p>
+        </div>
+        <div class="d-flex flex-shrink-0 flex-wrap gap-1">
+          <button type="button" class="btn btn-sm ${isActive ? 'btn-light' : 'btn-outline-primary'}" data-action="set-active">${isActive ? 'Aktywny' : 'Ustaw jako aktywny'}</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-action="edit">Edytuj</button>
+          <button type="button" class="btn btn-sm btn-outline-danger" data-action="delete">Usuń</button>
+        </div>
       </div>
     `;
-
-    if (activeProjectId === project.id) {
-      li.classList.add('project-item--active');
-    }
 
     projectsList.appendChild(li);
   }
@@ -443,9 +545,9 @@ function setStoryEditing(story: Story | null): void {
 
 function renderStories(): void {
   if (!activeProjectId) {
-    storiesCard.classList.add('stories-card--disabled');
+    storiesCard.classList.add('opacity-50');
     storiesProjectLabel.textContent = 'Brak aktywnego projektu.';
-    storiesEmpty.style.display = 'block';
+    storiesEmpty.classList.remove('d-none');
     storiesList.innerHTML = '';
     storyForm.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>(
       'input, textarea, select',
@@ -457,7 +559,7 @@ function renderStories(): void {
     return;
   }
 
-  storiesCard.classList.remove('stories-card--disabled');
+  storiesCard.classList.remove('opacity-50');
   const projects = getProjects();
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
   storiesProjectLabel.textContent = activeProject
@@ -481,40 +583,38 @@ function renderStories(): void {
   storiesList.innerHTML = '';
 
   if (filteredStories.length === 0) {
-    storiesEmpty.style.display = 'block';
+    storiesEmpty.classList.remove('d-none');
     return;
   }
 
-  storiesEmpty.style.display = 'none';
+  storiesEmpty.classList.add('d-none');
 
   filteredStories.forEach((story) => {
     const li = document.createElement('li');
-    li.className = 'story-item';
+    li.className = 'list-group-item story-item';
     li.dataset.id = story.id;
 
     li.innerHTML = `
-      <div class="story-main">
-        <div class="story-header-row">
-          <span class="story-title">${story.name || 'Bez tytułu'}</span>
-          <span class="story-meta">
-            <span class="story-badge story-badge--priority story-badge--priority-${story.priority}">
-              ${formatStoryPriority(story.priority)}
+      <div class="d-flex flex-column flex-md-row justify-content-between align-items-start gap-3">
+        <div class="flex-grow-1">
+          <div class="d-flex flex-wrap justify-content-between align-items-baseline gap-2 mb-1">
+            <span class="fw-semibold">${story.name || 'Bez tytułu'}</span>
+            <span class="d-inline-flex flex-wrap gap-1">
+              <span class="badge ${storyPriorityBadgeClass(story.priority)}">${formatStoryPriority(story.priority)}</span>
+              <span class="badge ${storyStateBadgeClass(story.state)}">${formatStoryState(story.state)}</span>
             </span>
-            <span class="story-badge story-badge--state story-badge--state-${story.state}">
-              ${formatStoryState(story.state)}
-            </span>
-          </span>
+          </div>
+          <p class="small text-body-secondary mb-2">${story.description || '<brak opisu>'}</p>
+          <p class="small text-body-secondary mb-0 d-flex flex-wrap justify-content-between gap-2">
+            <span>Właściciel: ${currentUser.firstName} ${currentUser.lastName}</span>
+            <span>Utworzono: ${formatDate(story.createdAt)}</span>
+          </p>
         </div>
-        <p class="story-description">${story.description || '<brak opisu>'}</p>
-        <p class="story-footer">
-          <span>Właściciel: ${currentUser.firstName} ${currentUser.lastName}</span>
-          <span>Utworzono: ${formatDate(story.createdAt)}</span>
-        </p>
-      </div>
-      <div class="story-actions">
-        <button type="button" class="btn small primary" data-action="story-active">Pokaż zadania</button>
-        <button type="button" class="btn small" data-action="story-edit">Edytuj</button>
-        <button type="button" class="btn small danger" data-action="story-delete">Usuń</button>
+        <div class="d-flex flex-shrink-0 flex-wrap gap-1">
+          <button type="button" class="btn btn-sm btn-primary" data-action="story-active">Pokaż zadania</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-action="story-edit">Edytuj</button>
+          <button type="button" class="btn btn-sm btn-outline-danger" data-action="story-delete">Usuń</button>
+        </div>
       </div>
     `;
 
@@ -670,27 +770,27 @@ storiesFilterButtons.forEach((btn) => {
     const filter = btn.dataset.filter as StoriesFilter | undefined;
     if (!filter) return;
     activeStoriesFilter = filter;
-    storiesFilterButtons.forEach((b) => b.classList.remove('stories-filter-btn--active'));
-    btn.classList.add('stories-filter-btn--active');
+    storiesFilterButtons.forEach((b) => b.classList.remove('active'));
+    btn.classList.add('active');
     renderStories();
   });
 });
 
 cancelEditBtn.disabled = true;
-storiesFilterButtons[0]?.classList.add('stories-filter-btn--active');
+storiesFilterButtons[0]?.classList.add('active');
 renderProjects();
 
-// Tasks Logic
 function renderTasks(): void {
   if (!activeStoryId) {
     tasksCardLabel.textContent = 'Wybierz historyjkę, aby zarządzać zadaniami.';
     addTaskBtn.disabled = true;
-    kanbanBoard.style.display = 'none';
+    kanbanBoard.classList.add('d-none');
+    kanbanBoard.classList.remove('d-flex');
     return;
   }
 
   const stories = getStoriesByProject(activeProjectId!);
-  const story = stories.find(s => s.id === activeStoryId);
+  const story = stories.find((s) => s.id === activeStoryId);
 
   if (!story) {
     activeStoryId = null;
@@ -700,33 +800,32 @@ function renderTasks(): void {
 
   tasksCardLabel.textContent = `Zadania dla: ${story.name}`;
   addTaskBtn.disabled = false;
-  kanbanBoard.style.display = 'flex';
+  kanbanBoard.classList.remove('d-none');
+  kanbanBoard.classList.add('d-flex');
 
   const tasks = getTasksByStory(activeStoryId);
   kanbanTodo.innerHTML = '';
   kanbanDoing.innerHTML = '';
   kanbanDone.innerHTML = '';
 
-  tasks.forEach(task => {
+  tasks.forEach((task) => {
     const div = document.createElement('div');
-    div.className = 'task-item';
+    div.className = 'task-item card card-body p-2 mb-2 shadow-sm';
     div.dataset.id = task.id;
 
     let assigneeName = 'Brak';
     if (task.assigneeId) {
-      const u = getUsers().find(x => x.id === task.assigneeId);
+      const u = getUsers().find((x) => x.id === task.assigneeId);
       if (u) assigneeName = `${u.firstName} ${u.lastName}`;
     }
 
     div.innerHTML = `
-      <div class="task-title">${task.name}</div>
-      <div class="task-meta">
+      <div class="fw-semibold small mb-1">${task.name}</div>
+      <div class="d-flex justify-content-between text-muted" style="font-size: 0.75rem;">
         <span>Czas: ${task.estimatedHours}h</span>
-        <span>Priorytet: ${task.priority}</span>
+        <span>${task.priority}</span>
       </div>
-      <div class="task-meta">
-        <span>${assigneeName}</span>
-      </div>
+      <div class="text-muted mt-1" style="font-size: 0.75rem;">${assigneeName}</div>
     `;
 
     if (task.state === 'todo') kanbanTodo.appendChild(div);
@@ -737,8 +836,8 @@ function renderTasks(): void {
 
 function openTaskModal(task: Task | null): void {
   taskAssigneeSelect.innerHTML = '<option value="">Wybierz...</option>';
-  const eligibleUsers = getUsers().filter(u => u.role === 'devops' || u.role === 'developer');
-  eligibleUsers.forEach(u => {
+  const eligibleUsers = getUsers().filter((u) => u.role === 'devops' || u.role === 'developer');
+  eligibleUsers.forEach((u) => {
     const opt = document.createElement('option');
     opt.value = u.id;
     opt.textContent = `${u.firstName} ${u.lastName} (${u.role})`;
@@ -751,13 +850,13 @@ function openTaskModal(task: Task | null): void {
     taskDescriptionInput.value = '';
     taskPrioritySelect.value = 'medium';
     taskHoursInput.value = '1';
-    taskAssigneeField.style.display = 'none';
+    taskAssigneeField.classList.add('d-none');
     taskAssigneeSelect.value = '';
 
-    taskStats.style.display = 'none';
-    taskDeleteBtn.style.display = 'none';
-    taskStartBtn.style.display = 'none';
-    taskDoneBtn.style.display = 'none';
+    taskStats.classList.add('d-none');
+    taskDeleteBtn.classList.add('d-none');
+    taskStartBtn.classList.add('d-none');
+    taskDoneBtn.classList.add('d-none');
     taskSaveBtn.textContent = 'Zapisz zadanie';
   } else {
     taskIdInput.value = task.id;
@@ -766,54 +865,54 @@ function openTaskModal(task: Task | null): void {
     taskPrioritySelect.value = task.priority;
     taskHoursInput.value = task.estimatedHours.toString();
 
-    taskStats.style.display = 'block';
+    taskStats.classList.remove('d-none');
     taskStateLabel.textContent = task.state;
     taskCreatedAtLabel.textContent = formatDate(task.createdAt);
 
     if (task.startedAt) {
-      taskStartedContainer.style.display = 'block';
+      taskStartedContainer.classList.remove('d-none');
       taskStartedAtLabel.textContent = formatDate(task.startedAt);
     } else {
-      taskStartedContainer.style.display = 'none';
+      taskStartedContainer.classList.add('d-none');
     }
 
     if (task.finishedAt) {
-      taskFinishedContainer.style.display = 'block';
+      taskFinishedContainer.classList.remove('d-none');
       taskFinishedAtLabel.textContent = formatDate(task.finishedAt);
     } else {
-      taskFinishedContainer.style.display = 'none';
+      taskFinishedContainer.classList.add('d-none');
     }
 
     if (task.assigneeId) {
-      const u = getUsers().find(x => x.id === task.assigneeId);
+      const u = getUsers().find((x) => x.id === task.assigneeId);
       taskAssigneeLabel.textContent = u ? `${u.firstName} ${u.lastName}` : task.assigneeId;
     } else {
       taskAssigneeLabel.textContent = 'Brak';
     }
 
-    taskDeleteBtn.style.display = 'inline-flex';
+    taskDeleteBtn.classList.remove('d-none');
     taskSaveBtn.textContent = 'Zapisz zmiany';
 
     if (task.state === 'todo') {
-      taskAssigneeField.style.display = 'flex';
-      taskStartBtn.style.display = 'inline-flex';
-      taskDoneBtn.style.display = 'none';
+      taskAssigneeField.classList.remove('d-none');
+      taskStartBtn.classList.remove('d-none');
+      taskDoneBtn.classList.add('d-none');
     } else if (task.state === 'doing') {
-      taskAssigneeField.style.display = 'none';
-      taskStartBtn.style.display = 'none';
-      taskDoneBtn.style.display = 'inline-flex';
+      taskAssigneeField.classList.add('d-none');
+      taskStartBtn.classList.add('d-none');
+      taskDoneBtn.classList.remove('d-none');
     } else {
-      taskAssigneeField.style.display = 'none';
-      taskStartBtn.style.display = 'none';
-      taskDoneBtn.style.display = 'none';
+      taskAssigneeField.classList.add('d-none');
+      taskStartBtn.classList.add('d-none');
+      taskDoneBtn.classList.add('d-none');
     }
   }
 
-  taskModal.classList.remove('hidden');
+  bsTaskModal.show();
 }
 
 function closeTaskModal(): void {
-  taskModal.classList.add('hidden');
+  bsTaskModal.hide();
 }
 
 taskModalCloseBtn.addEventListener('click', closeTaskModal);
@@ -835,7 +934,10 @@ taskForm.addEventListener('submit', (e) => {
     updateTask(id, { name, description, priority, estimatedHours });
   } else {
     createTask({
-      name, description, priority, estimatedHours,
+      name,
+      description,
+      priority,
+      estimatedHours,
       storyId: activeStoryId,
       state: 'todo',
     });
@@ -867,7 +969,7 @@ taskStartBtn.addEventListener('click', () => {
   updateTask(id, {
     state: 'doing',
     assigneeId: assigneeId,
-    startedAt: new Date().toISOString()
+    startedAt: new Date().toISOString(),
   });
   closeTaskModal();
   renderTasks();
@@ -879,7 +981,7 @@ taskDoneBtn.addEventListener('click', () => {
   if (!id) return;
   updateTask(id, {
     state: 'done',
-    finishedAt: new Date().toISOString()
+    finishedAt: new Date().toISOString(),
   });
   closeTaskModal();
   renderTasks();
@@ -891,7 +993,7 @@ kanbanBoard.addEventListener('click', (e) => {
   const item = target.closest<HTMLDivElement>('.task-item');
   if (item && item.dataset.id) {
     const tasks = getTasksByStory(activeStoryId!);
-    const task = tasks.find(t => t.id === item.dataset.id) || null;
+    const task = tasks.find((t) => t.id === item.dataset.id) || null;
     if (task) openTaskModal(task);
   }
 });
