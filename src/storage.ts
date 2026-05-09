@@ -1,10 +1,11 @@
-import type { Project, Story, Task, User } from './types';
+import type { Project, Story, Task, User, Notification } from './types';
 
 const PROJECTS_KEY = 'manageme-projects';
 const ACTIVE_PROJECT_KEY = 'manageme-active-project-id';
 const STORIES_KEY = 'manageme-stories';
 const TASKS_KEY = 'manageme-tasks';
 const USER_KEY = 'manageme-current-user';
+const NOTIFICATIONS_KEY = 'manageme-notifications';
 
 function readProjectsRaw(): Project[] {
   const raw = window.localStorage.getItem(PROJECTS_KEY);
@@ -241,8 +242,64 @@ export function deleteTask(id: string): void {
     const storyId = tasks[idx].storyId;
     tasks.splice(idx, 1);
     writeTasksRaw(tasks);
-    updateStoryStatusAfterTaskChange(storyId);
+}
+}
+
+// Notifications
+
+function readNotificationsRaw(): Notification[] {
+  const raw = window.localStorage.getItem(NOTIFICATIONS_KEY);
+  if (!raw) return [];
+
+  try {
+    const parsed = JSON.parse(raw) as Notification[];
+    if (!Array.isArray(parsed)) return [];
+    return parsed;
+  } catch {
+    return [];
   }
 }
 
+function writeNotificationsRaw(notifications: Notification[]): void {
+  window.localStorage.setItem(NOTIFICATIONS_KEY, JSON.stringify(notifications));
+}
 
+export function getNotifications(userId: string): Notification[] {
+  return readNotificationsRaw().filter(n => n.recipientId === userId).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+}
+
+export function createNotification(data: Omit<Notification, 'id' | 'date' | 'isRead'>): Notification {
+  const notifications = readNotificationsRaw();
+  const next: Notification = {
+    id: crypto.randomUUID ? crypto.randomUUID() : String(Date.now()),
+    date: new Date().toISOString(),
+    isRead: false,
+    ...data,
+  };
+  notifications.push(next);
+  writeNotificationsRaw(notifications);
+  return next;
+}
+
+export function markNotificationAsRead(id: string): void {
+  const notifications = readNotificationsRaw();
+  const idx = notifications.findIndex(n => n.id === id);
+  if (idx !== -1) {
+    notifications[idx].isRead = true;
+    writeNotificationsRaw(notifications);
+  }
+}
+
+export function markAllNotificationsAsRead(userId: string): void {
+  const notifications = readNotificationsRaw();
+  let changed = false;
+  for (const n of notifications) {
+    if (n.recipientId === userId && !n.isRead) {
+      n.isRead = true;
+      changed = true;
+    }
+  }
+  if (changed) {
+    writeNotificationsRaw(notifications);
+  }
+}

@@ -1,5 +1,5 @@
 import './style.css';
-import type { Project, Story, StoryPriority, StoryState, User, Task, TaskPriority } from './types';
+import type { Project, Story, StoryPriority, StoryState, User, Task, TaskPriority, Notification } from './types';
 import {
   createProject,
   createStory,
@@ -17,7 +17,13 @@ import {
   updateTask,
   deleteTask,
   getUsers,
+  getNotifications,
+  markNotificationAsRead,
+  markAllNotificationsAsRead,
 } from './storage';
+import { notificationService } from './notifications';
+
+declare var bootstrap: any;
 
 const app = document.querySelector<HTMLDivElement>('#app');
 
@@ -27,202 +33,231 @@ if (!app) {
 
 const currentUser: User = getCurrentUser();
 
-app.innerHTML = `
-  <div class="page">
-    <header class="page-header">
-      <div>
-        <h1>ManageMe</h1>
-        <p class="subtitle">Proste zarządzanie projektami, historyjkami i aktywnym kontekstem.</p>
+app.innerHTML = \`
+<div class="container py-4">
+  <header class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+      <h1 class="display-5 fw-bold mb-0">ManageMe</h1>
+      <p class="text-secondary mb-0">Proste zarządzanie projektami, historyjkami i aktywnym kontekstem.</p>
+    </div>
+    <div class="d-flex align-items-center gap-3">
+      <button class="btn btn-outline-secondary rounded-circle notification-bell hover-lift" id="notifications-btn" data-bs-toggle="offcanvas" data-bs-target="#notifications-offcanvas" aria-controls="notifications-offcanvas">
+        <i class="bi bi-bell"></i>
+        <span class="badge bg-danger notification-badge shadow-sm" id="notifications-count" style="display: none;">0</span>
+      </button>
+      <button class="btn btn-outline-secondary rounded-circle d-flex align-items-center justify-content-center" style="width: 42px; height: 42px;" id="theme-switcher" aria-label="Zmień motyw">
+        <i class="bi bi-moon-stars"></i>
+      </button>
+      <div class="text-end">
+        <div class="small text-uppercase text-secondary" style="font-size: 0.7rem; letter-spacing: 0.1em;">Zalogowany użytkownik</div>
+        <div class="badge bg-secondary bg-opacity-25 border border-secondary text-body rounded-pill py-2 px-3 fw-medium" id="user-name"></div>
       </div>
-      <div class="user-badge">
-        <span class="user-label">Zalogowany użytkownik</span>
-        <span class="user-name" id="user-name"></span>
-      </div>
-    </header>
+    </div>
+  </header>
 
-    <main class="layout">
-      <section class="card">
-        <h2>Projekt</h2>
-        <form id="project-form" class="form">
+  <div class="row g-4">
+    <div class="col-lg-5">
+      <div class="card p-4 border-0 mb-4 hover-lift">
+        <h2 class="h5 fw-semibold mb-3">Projekt</h2>
+        <form id="project-form" class="d-flex flex-column gap-3">
           <input type="hidden" id="project-id" />
+          
+          <div>
+            <label class="form-label text-secondary small mb-1">Nazwa projektu</label>
+            <input id="project-name" class="form-control" type="text" placeholder="Np. Aplikacja CRM" required />
+          </div>
 
-          <label class="field">
-            <span>Nazwa projektu</span>
-            <input id="project-name" type="text" placeholder="Np. Aplikacja CRM" required />
-          </label>
+          <div>
+            <label class="form-label text-secondary small mb-1">Opis</label>
+            <textarea id="project-description" class="form-control" rows="3" placeholder="Krótki opis celu projektu"></textarea>
+          </div>
 
-          <label class="field">
-            <span>Opis</span>
-            <textarea id="project-description" rows="4" placeholder="Krótki opis celu projektu"></textarea>
-          </label>
-
-          <div class="form-actions">
-            <button type="submit" class="btn primary" id="save-btn">Zapisz</button>
-            <button type="button" class="btn ghost" id="cancel-edit-btn">Anuluj edycję</button>
+          <div class="d-flex justify-content-end gap-2 mt-2">
+            <button type="button" class="btn btn-light" id="cancel-edit-btn">Anuluj edycję</button>
+            <button type="submit" class="btn btn-primary" id="save-btn">Zapisz</button>
           </div>
         </form>
-      </section>
+      </div>
 
-      <section class="card">
-        <header class="card-header">
+      <div class="card p-4 border-0 hover-lift">
+        <header class="d-flex justify-content-between align-items-start mb-3">
           <div>
-            <h2>Lista projektów</h2>
-            <p class="card-subtitle">Wybierz aktywny projekt, aby pracować na jego historyjkach.</p>
+            <h2 class="h5 fw-semibold mb-1">Lista projektów</h2>
+            <p class="text-secondary small mb-0">Wybierz aktywny projekt, aby pracować na jego historyjkach.</p>
           </div>
-          <div class="card-header-right">
-            <span class="chip" id="projects-count">0 projektów</span>
-          </div>
+          <span class="badge bg-secondary bg-opacity-25 border border-secondary text-body rounded-pill px-3 py-2" id="projects-count">0 projektów</span>
         </header>
-        <div id="projects-empty" class="empty">
-          Brak projektów. Dodaj pierwszy projekt w formularzu obok.
+        <div id="projects-empty" class="empty-state">
+          Brak projektów. Dodaj pierwszy projekt w formularzu powyżej.
         </div>
-        <ul id="projects-list" class="projects-list"></ul>
-      </section>
+        <ul id="projects-list" class="list-unstyled d-flex flex-column gap-2 mb-0" style="max-height: 400px; overflow-y: auto;"></ul>
+      </div>
+    </div>
 
-      <section class="card stories-card">
-        <header class="card-header">
+    <div class="col-lg-7">
+      <div class="card p-4 border-0 mb-4 hover-lift" id="stories-card">
+        <header class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-3">
           <div>
-            <h2>Historyjki projektu</h2>
-            <p class="card-subtitle" id="stories-project-label">Brak aktywnego projektu.</p>
+            <h2 class="h5 fw-semibold mb-1">Historyjki projektu</h2>
+            <p class="text-secondary small mb-0" id="stories-project-label">Brak aktywnego projektu.</p>
           </div>
-          <div class="stories-filters">
-            <button class="btn small stories-filter-btn" data-filter="all">Wszystkie</button>
-            <button class="btn small stories-filter-btn" data-filter="todo">Do zrobienia</button>
-            <button class="btn small stories-filter-btn" data-filter="doing">W toku</button>
-            <button class="btn small stories-filter-btn" data-filter="done">Zamknięte</button>
+          <div class="d-flex flex-wrap gap-2">
+            <button class="btn btn-sm btn-primary stories-filter-btn active" data-filter="all">Wszystkie</button>
+            <button class="btn btn-sm btn-outline-secondary stories-filter-btn" data-filter="todo">Do zrobienia</button>
+            <button class="btn btn-sm btn-outline-primary stories-filter-btn" data-filter="doing">W toku</button>
+            <button class="btn btn-sm btn-outline-success stories-filter-btn" data-filter="done">Zamknięte</button>
           </div>
         </header>
 
-        <form id="story-form" class="form stories-form">
+        <form id="story-form" class="mb-4">
           <input type="hidden" id="story-id" />
-
-          <div class="stories-form-grid">
-            <label class="field">
-              <span>Tytuł</span>
-              <input id="story-name" type="text" placeholder="Krótki tytuł historyjki" required />
-            </label>
-
-            <label class="field">
-              <span>Priorytet</span>
-              <select id="story-priority">
+          <div class="row g-2 mb-3">
+            <div class="col-md-5">
+              <label class="form-label text-secondary small mb-1">Tytuł</label>
+              <input id="story-name" class="form-control form-control-sm" type="text" placeholder="Krótki tytuł" required />
+            </div>
+            <div class="col-md-3">
+              <label class="form-label text-secondary small mb-1">Priorytet</label>
+              <select id="story-priority" class="form-select form-select-sm">
                 <option value="low">Niski</option>
                 <option value="medium" selected>Średni</option>
                 <option value="high">Wysoki</option>
               </select>
-            </label>
-
-            <label class="field">
-              <span>Status</span>
-              <select id="story-state">
+            </div>
+            <div class="col-md-4">
+              <label class="form-label text-secondary small mb-1">Status</label>
+              <select id="story-state" class="form-select form-select-sm">
                 <option value="todo">Do zrobienia</option>
                 <option value="doing">W toku</option>
                 <option value="done">Zamknięte</option>
               </select>
-            </label>
+            </div>
           </div>
-
-          <label class="field">
-            <span>Opis</span>
-            <textarea id="story-description" rows="3" placeholder="Szczegóły funkcjonalności"></textarea>
-          </label>
-
-          <div class="form-actions">
-            <button type="submit" class="btn primary" id="story-save-btn">Zapisz historyjkę</button>
-            <button type="button" class="btn ghost" id="story-cancel-btn">Wyczyść formularz</button>
+          <div class="mb-3">
+            <label class="form-label text-secondary small mb-1">Opis</label>
+            <textarea id="story-description" class="form-control form-control-sm" rows="2" placeholder="Szczegóły funkcjonalności"></textarea>
+          </div>
+          <div class="d-flex justify-content-end gap-2">
+            <button type="button" class="btn btn-sm btn-light" id="story-cancel-btn">Wyczyść</button>
+            <button type="submit" class="btn btn-sm btn-primary" id="story-save-btn">Zapisz historyjkę</button>
           </div>
         </form>
 
-        <div id="stories-empty" class="empty">
+        <div id="stories-empty" class="empty-state">
           Brak historyjek dla aktywnego projektu.
         </div>
+        <ul id="stories-list" class="list-unstyled d-flex flex-column gap-2 mb-0" style="max-height: 350px; overflow-y: auto;"></ul>
+      </div>
 
-        <ul id="stories-list" class="stories-list"></ul>
-      </section>
-
-      <section class="card tasks-card">
-        <header class="card-header">
+      <div class="card p-4 border-0 hover-lift" id="tasks-card">
+        <header class="d-flex justify-content-between align-items-center mb-3">
           <div>
-            <h2>Tablica Zadań</h2>
-            <p class="card-subtitle" id="tasks-story-label">Wybierz historyjkę, aby zarządzać zadaniami.</p>
+            <h2 class="h5 fw-semibold mb-1">Tablica Zadań</h2>
+            <p class="text-secondary small mb-0" id="tasks-story-label">Wybierz historyjkę, aby zarządzać zadaniami.</p>
           </div>
-          <div class="card-header-right">
-            <button type="button" class="btn small primary" id="add-task-btn" disabled>Dodaj zadanie</button>
-          </div>
+          <button type="button" class="btn btn-sm btn-primary shadow-sm" id="add-task-btn" disabled><i class="bi bi-plus-lg"></i> Dodaj zadanie</button>
         </header>
+
         <div class="kanban-board" id="kanban-board" style="display: none;">
           <div class="kanban-column">
-            <h3>Do zrobienia</h3>
+            <h3 class="fw-semibold"><i class="bi bi-card-checklist text-secondary me-1"></i> Do zrobienia</h3>
             <div class="kanban-list" id="kanban-todo" data-state="todo"></div>
           </div>
           <div class="kanban-column">
-            <h3>W toku</h3>
+            <h3 class="fw-semibold"><i class="bi bi-clock-history text-primary me-1"></i> W toku</h3>
             <div class="kanban-list" id="kanban-doing" data-state="doing"></div>
           </div>
           <div class="kanban-column">
-            <h3>Zamknięte</h3>
+            <h3 class="fw-semibold"><i class="bi bi-check2-circle text-success me-1"></i> Zamknięte</h3>
             <div class="kanban-list" id="kanban-done" data-state="done"></div>
           </div>
         </div>
-      </section>
-    </main>
-  </div>
-
-  <div class="modal hidden" id="task-modal">
-    <div class="modal-content">
-      <header class="modal-header">
-        <h2 id="task-modal-title">Zadanie</h2>
-        <button type="button" class="btn clean" id="task-modal-close">&times;</button>
-      </header>
-      <form id="task-form" class="form">
-        <input type="hidden" id="task-id" />
-        
-        <div class="stories-form-grid">
-          <label class="field">
-            <span>Nazwa zadania</span>
-            <input id="task-name" type="text" placeholder="Krótka nazwa" required />
-          </label>
-          <label class="field">
-            <span>Priorytet</span>
-            <select id="task-priority">
-              <option value="low">Niski</option>
-              <option value="medium" selected>Średni</option>
-              <option value="high">Wysoki</option>
-            </select>
-          </label>
-          <label class="field">
-            <span>Czas (godziny)</span>
-            <input id="task-hours" type="number" min="0" step="0.5" value="1" required />
-          </label>
-          <label class="field" id="task-assignee-field" style="display: none;">
-            <span>Przypisz pracownika</span>
-            <select id="task-assignee">
-               <option value="">Wybierz...</option>
-            </select>
-          </label>
-        </div>
-
-        <label class="field">
-          <span>Opis</span>
-          <textarea id="task-description" rows="3" placeholder="Szczegóły..."></textarea>
-        </label>
-        
-        <div class="task-stats" id="task-stats" style="display: none;">
-           <p><strong>Stan:</strong> <span id="task-state-label"></span></p>
-           <p><strong>Przypisano:</strong> <span id="task-assignee-label"></span></p>
-           <p><strong>Dodano:</strong> <span id="task-created-at"></span></p>
-           <p id="task-started-container" style="display:none;"><strong>Start:</strong> <span id="task-started-at"></span></p>
-           <p id="task-finished-container" style="display:none;"><strong>Koniec:</strong> <span id="task-finished-at"></span></p>
-        </div>
-
-        <div class="form-actions" id="task-form-actions">
-           <button type="submit" class="btn primary" id="task-save-btn">Zapisz zadanie</button>
-           <button type="button" class="btn danger" id="task-delete-btn" style="display: none;">Usuń</button>
-           <button type="button" class="btn primary" id="task-start-btn" style="display: none;">Rozpocznij</button>
-           <button type="button" class="btn success" id="task-done-btn" style="display: none;">Zakończ</button>
-        </div>
-      </form>
+      </div>
     </div>
   </div>
+</div>
+
+<div class="custom-modal-overlay hidden" id="task-modal">
+  <div class="custom-modal-content card border-0 p-4 shadow-lg mx-auto">
+    <header class="d-flex justify-content-between align-items-center mb-4">
+      <h2 class="h5 fw-bold mb-0" id="task-modal-title">Zadanie</h2>
+      <button type="button" class="btn-close" id="task-modal-close" aria-label="Zwiń"></button>
+    </header>
+    <form id="task-form">
+      <input type="hidden" id="task-id" />
+      
+      <div class="row g-3 mb-3">
+        <div class="col-sm-12">
+          <label class="form-label text-secondary small mb-1">Nazwa zadania</label>
+          <input id="task-name" class="form-control" type="text" placeholder="Krótka nazwa" required />
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label text-secondary small mb-1">Priorytet</label>
+          <select id="task-priority" class="form-select">
+            <option value="low">Niski</option>
+            <option value="medium" selected>Średni</option>
+            <option value="high">Wysoki</option>
+          </select>
+        </div>
+        <div class="col-sm-4">
+          <label class="form-label text-secondary small mb-1">Czas (godz.)</label>
+          <input id="task-hours" class="form-control" type="number" min="0" step="0.5" value="1" required />
+        </div>
+        <div class="col-sm-4" id="task-assignee-field" style="display: none;">
+          <label class="form-label text-secondary small mb-1">Przypisz pracownika</label>
+          <select id="task-assignee" class="form-select">
+            <option value="">Wybierz...</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="mb-3">
+        <label class="form-label text-secondary small mb-1">Opis</label>
+        <textarea id="task-description" class="form-control" rows="3" placeholder="Szczegóły..."></textarea>
+      </div>
+
+      <div class="card bg-secondary bg-opacity-10 border-0 p-3 mb-4 rounded" id="task-stats" style="display: none;">
+        <div class="row small m-0">
+          <div class="col-6 mb-2 ps-0"><strong>Stan:</strong> <span class="badge bg-secondary px-2 py-1" id="task-state-label"></span></div>
+          <div class="col-6 mb-2 pe-0"><strong>Przypisano:</strong> <span id="task-assignee-label" class="text-body fw-medium"></span></div>
+          <div class="col-6 mb-2 ps-0"><strong>Dodano:</strong> <span id="task-created-at" class="text-muted fw-medium"></span></div>
+          <div class="col-6 mb-2 pe-0" id="task-started-container" style="display:none;"><strong>Start:</strong> <span id="task-started-at" class="text-muted fw-medium"></span></div>
+          <div class="col-6 mb-0 ps-0" id="task-finished-container" style="display:none;"><strong>Koniec:</strong> <span id="task-finished-at" class="text-muted fw-medium"></span></div>
+        </div>
+      </div>
+
+      <div class="d-flex justify-content-between align-items-center" id="task-form-actions">
+        <div>
+          <button type="button" class="btn btn-outline-danger" id="task-delete-btn" style="display: none;"><i class="bi bi-trash3"></i> Usuń</button>
+        </div>
+        <div class="d-flex gap-2">
+          <button type="button" class="btn btn-outline-primary fw-medium" id="task-start-btn" style="display: none;">Rozpocznij</button>
+          <button type="button" class="btn btn-outline-success fw-medium" id="task-done-btn" style="display: none;">Zakończ</button>
+          <button type="submit" class="btn btn-primary fw-medium shadow-sm" id="task-save-btn">Zapisz zadanie</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+
+<div class="offcanvas offcanvas-end shadow-lg" tabindex="-1" id="notifications-offcanvas" aria-labelledby="notifications-label" style="width: 400px; border-left: 1px solid var(--bs-border-color);">
+  <div class="offcanvas-header border-bottom">
+    <h5 class="offcanvas-title fw-bold" id="notifications-label"><i class="bi bi-bell-fill text-primary me-2"></i>Powiadomienia</h5>
+    <div class="d-flex gap-2 align-items-center">
+      <button type="button" class="btn btn-sm btn-outline-secondary" id="mark-all-read-btn" title="Oznacz wszystkie jako przeczytane"><i class="bi bi-check2-all"></i></button>
+      <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Zamknij"></button>
+    </div>
+  </div>
+  <div class="offcanvas-body p-0 bg-body-tertiary">
+    <div id="notifications-empty" class="p-4 text-center text-secondary" style="display: none;">
+      <i class="bi bi-inbox fs-1 mb-2 d-block opacity-50"></i>
+      Brak nowych powiadomień.
+    </div>
+    <div class="list-group list-group-flush" id="notifications-list"></div>
+  </div>
+</div>
+
+<div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container" style="z-index: 1100"></div>
 `;
 
 const userNameLabel = document.querySelector<HTMLSpanElement>('#user-name')!;
@@ -312,9 +347,146 @@ const taskDeleteBtn = document.querySelector<HTMLButtonElement>('#task-delete-bt
 const taskStartBtn = document.querySelector<HTMLButtonElement>('#task-start-btn')!;
 const taskDoneBtn = document.querySelector<HTMLButtonElement>('#task-done-btn')!;
 
-if (!tasksCardLabel || !addTaskBtn || !kanbanBoard || !kanbanTodo || !kanbanDoing || !kanbanDone || !taskModal || !taskModalCloseBtn || !taskForm || !taskIdInput || !taskNameInput || !taskPrioritySelect || !taskHoursInput || !taskAssigneeField || !taskAssigneeSelect || !taskDescriptionInput || !taskStats || !taskStateLabel || !taskAssigneeLabel || !taskCreatedAtLabel || !taskStartedContainer || !taskStartedAtLabel || !taskFinishedContainer || !taskFinishedAtLabel || !taskSaveBtn || !taskDeleteBtn || !taskStartBtn || !taskDoneBtn) {
-  throw new Error('ManageMe Tasks UI elements not found');
+// Theme Switcher Logic
+const themeSwitcher = document.querySelector<HTMLButtonElement>('#theme-switcher')!;
+const htmlEl = document.documentElement;
+
+if (themeSwitcher) {
+  const savedTheme = localStorage.getItem('theme');
+  if (savedTheme) {
+    htmlEl.setAttribute('data-bs-theme', savedTheme);
+    themeSwitcher.innerHTML = savedTheme === 'dark' ? '<i class="bi bi-sun"></i>' : '<i class="bi bi-moon-stars"></i>';
+  } else if (window.matchMedia && window.matchMedia('(prefers-color-scheme: light)').matches) {
+    htmlEl.setAttribute('data-bs-theme', 'light');
+    themeSwitcher.innerHTML = '<i class="bi bi-moon-stars"></i>';
+  }
+
+  themeSwitcher.addEventListener('click', () => {
+    const currentTheme = htmlEl.getAttribute('data-bs-theme');
+    const newTheme = currentTheme === 'dark' ? 'light' : 'dark';
+    htmlEl.setAttribute('data-bs-theme', newTheme);
+    localStorage.setItem('theme', newTheme);
+    themeSwitcher.innerHTML = newTheme === 'dark' ? '<i class="bi bi-sun"></i>' : '<i class="bi bi-moon-stars"></i>';
+  });
 }
+
+// Notifications elements
+const notificationsBtn = document.querySelector<HTMLButtonElement>('#notifications-btn')!;
+const notificationsCount = document.querySelector<HTMLSpanElement>('#notifications-count')!;
+const notificationsList = document.querySelector<HTMLDivElement>('#notifications-list')!;
+const notificationsEmpty = document.querySelector<HTMLDivElement>('#notifications-empty')!;
+const markAllReadBtn = document.querySelector<HTMLButtonElement>('#mark-all-read-btn')!;
+const toastContainer = document.querySelector<HTMLDivElement>('#toast-container')!;
+
+if (!notificationsBtn || !notificationsCount || !notificationsList || !notificationsEmpty || !markAllReadBtn || !toastContainer) {
+  throw new Error('ManageMe Notifications UI elements not found');
+}
+
+function renderNotifications(): void {
+  const notifications = getNotifications(currentUser.id);
+  const unreadCount = notifications.filter(n => !n.isRead).length;
+
+  if (unreadCount > 0) {
+    notificationsCount.textContent = unreadCount.toString();
+    notificationsCount.style.display = 'inline-block';
+  } else {
+    notificationsCount.style.display = 'none';
+  }
+
+  notificationsList.innerHTML = '';
+
+  if (notifications.length === 0) {
+    notificationsEmpty.style.display = 'block';
+  } else {
+    notificationsEmpty.style.display = 'none';
+    
+    notifications.forEach(notif => {
+      const a = document.createElement('a');
+      a.className = `list-group-item list-group-item-action notification-item priority-${notif.priority} ${!notif.isRead ? 'unread' : ''}`;
+      a.dataset.id = notif.id;
+      a.innerHTML = `
+        <div class="notification-title d-flex justify-content-between align-items-center">
+          <span>${notif.title}</span>
+          ${!notif.isRead ? '<span class="badge bg-primary rounded-pill" style="width: 8px; height: 8px; padding: 0;">&nbsp;</span>' : ''}
+        </div>
+        <div class="notification-message">${notif.message}</div>
+        <div class="notification-meta">
+          <span>${formatDate(notif.date)}</span>
+          ${!notif.isRead ? '<button class="btn btn-sm btn-link text-decoration-none p-0" data-action="mark-read">Oznacz jako przeczytane</button>' : ''}
+        </div>
+      `;
+      notificationsList.appendChild(a);
+    });
+  }
+}
+
+function showToast(notif: Notification): void {
+  if (notif.priority !== 'medium' && notif.priority !== 'high') return;
+
+  const toastId = 'toast-' + notif.id;
+  const toastHtml = `
+    <div id="${toastId}" class="toast" role="alert" aria-live="assertive" aria-atomic="true" data-bs-delay="5000">
+      <div class="toast-header">
+        <strong class="me-auto ${notif.priority === 'high' ? 'text-danger' : 'text-warning'}">
+          <i class="bi bi-bell-fill me-1"></i> ${notif.title}
+        </strong>
+        <small class="text-muted">teraz</small>
+        <button type="button" class="btn-close" data-bs-dismiss="toast" aria-label="Zamknij"></button>
+      </div>
+      <div class="toast-body">
+        ${notif.message}
+      </div>
+    </div>
+  `;
+  
+  toastContainer.insertAdjacentHTML('beforeend', toastHtml);
+  const toastEl = document.getElementById(toastId);
+  if (toastEl) {
+    // @ts-ignore
+    const toast = new bootstrap.Toast(toastEl);
+    toast.show();
+    
+    toastEl.addEventListener('hidden.bs.toast', () => {
+      toastEl.remove();
+    });
+  }
+}
+
+notificationsList.addEventListener('click', (e) => {
+  const target = e.target as HTMLElement;
+  const item = target.closest('.notification-item');
+  if (!item) return;
+
+  const id = (item as HTMLElement).dataset.id;
+  if (!id) return;
+
+  if (target.closest('[data-action="mark-read"]')) {
+    e.preventDefault();
+    e.stopPropagation();
+    markNotificationAsRead(id);
+    renderNotifications();
+    return;
+  }
+
+  // Kliknięcie w powiadomienie też oznacza jako przeczytane
+  markNotificationAsRead(id);
+  renderNotifications();
+});
+
+markAllReadBtn.addEventListener('click', () => {
+  markAllNotificationsAsRead(currentUser.id);
+  renderNotifications();
+});
+
+window.addEventListener('app:new-notification', (e: Event) => {
+  const notif = (e as CustomEvent).detail as Notification;
+  if (notif.recipientId === currentUser.id) {
+    renderNotifications();
+    showToast(notif);
+  }
+});
+
+renderNotifications();
 
 type StoriesFilter = 'all' | StoryState;
 
@@ -391,25 +563,20 @@ function renderProjects(): void {
 
   for (const project of projects) {
     const li = document.createElement('li');
-    li.className = 'project-item';
-    li.dataset.id = project.id;
-
+    li.className = `p-3 mb-2 rounded border hover-lift d-flex justify-content-between align-items-start gap-3 ${activeProjectId === project.id ? 'border-primary border-2 bg-primary bg-opacity-10' : 'border-secondary border-opacity-25 bg-body-tertiary bg-opacity-50'}`;
     li.innerHTML = `
-      <div class="project-main">
-        <h3>${project.name || 'Bez nazwy'}</h3>
-        <p>${project.description || '<brak opisu>'}</p>
+      <div class="flex-grow-1">
+        <h3 class="h6 fw-semibold mb-1">${project.name || 'Bez nazwy'}</h3>
+        <p class="text-secondary small mb-0" style="white-space: pre-wrap;">${project.description || '<brak opisu>'}</p>
       </div>
-      <div class="project-actions">
-        <button type="button" class="btn small" data-action="set-active">${activeProjectId === project.id ? 'Aktywny' : 'Ustaw jako aktywny'
-      }</button>
-        <button type="button" class="btn small" data-action="edit">Edytuj</button>
-        <button type="button" class="btn small danger" data-action="delete">Usuń</button>
+      <div class="d-flex gap-2 flex-shrink-0">
+        <button type="button" class="btn btn-sm ${activeProjectId === project.id ? 'btn-primary shadow-sm' : 'btn-outline-secondary'}" data-action="set-active">
+          ${activeProjectId === project.id ? '<i class="bi bi-check2"></i>' : 'Aktywuj'}
+        </button>
+        <button type="button" class="btn btn-sm btn-outline-secondary" data-action="edit" title="Edytuj"><i class="bi bi-pencil"></i></button>
+        <button type="button" class="btn btn-sm btn-outline-danger" data-action="delete" title="Usuń"><i class="bi bi-trash3"></i></button>
       </div>
     `;
-
-    if (activeProjectId === project.id) {
-      li.classList.add('project-item--active');
-    }
 
     projectsList.appendChild(li);
   }
@@ -443,7 +610,7 @@ function setStoryEditing(story: Story | null): void {
 
 function renderStories(): void {
   if (!activeProjectId) {
-    storiesCard.classList.add('stories-card--disabled');
+    storiesCard.classList.add('opacity-50');
     storiesProjectLabel.textContent = 'Brak aktywnego projektu.';
     storiesEmpty.style.display = 'block';
     storiesList.innerHTML = '';
@@ -457,7 +624,7 @@ function renderStories(): void {
     return;
   }
 
-  storiesCard.classList.remove('stories-card--disabled');
+  storiesCard.classList.remove('opacity-50');
   const projects = getProjects();
   const activeProject = projects.find((p) => p.id === activeProjectId) ?? null;
   storiesProjectLabel.textContent = activeProject
@@ -489,32 +656,29 @@ function renderStories(): void {
 
   filteredStories.forEach((story) => {
     const li = document.createElement('li');
-    li.className = 'story-item';
-    li.dataset.id = story.id;
-
+    li.className = 'p-3 mb-2 rounded border border-secondary border-opacity-25 bg-body-tertiary bg-opacity-50 hover-lift d-flex flex-column gap-2 cursor-pointer';
     li.innerHTML = `
-      <div class="story-main">
-        <div class="story-header-row">
-          <span class="story-title">${story.name || 'Bez tytułu'}</span>
-          <span class="story-meta">
-            <span class="story-badge story-badge--priority story-badge--priority-${story.priority}">
-              ${formatStoryPriority(story.priority)}
-            </span>
-            <span class="story-badge story-badge--state story-badge--state-${story.state}">
-              ${formatStoryState(story.state)}
-            </span>
+      <div class="d-flex gap-2 justify-content-between align-items-start">
+        <h3 class="h6 fw-semibold mb-0">${story.name || 'Bez tytułu'}</h3>
+        <div class="d-flex gap-1 flex-shrink-0">
+          <span class="badge ${story.priority === 'high' ? 'text-bg-danger' : story.priority === 'medium' ? 'text-bg-warning' : 'text-bg-success'}">
+            ${formatStoryPriority(story.priority)}
+          </span>
+          <span class="badge ${story.state === 'done' ? 'text-bg-success' : story.state === 'doing' ? 'text-bg-primary' : 'text-bg-secondary'}">
+            ${formatStoryState(story.state)}
           </span>
         </div>
-        <p class="story-description">${story.description || '<brak opisu>'}</p>
-        <p class="story-footer">
-          <span>Właściciel: ${currentUser.firstName} ${currentUser.lastName}</span>
-          <span>Utworzono: ${formatDate(story.createdAt)}</span>
-        </p>
       </div>
-      <div class="story-actions">
-        <button type="button" class="btn small primary" data-action="story-active">Pokaż zadania</button>
-        <button type="button" class="btn small" data-action="story-edit">Edytuj</button>
-        <button type="button" class="btn small danger" data-action="story-delete">Usuń</button>
+      <p class="text-secondary small mb-0" style="white-space: pre-wrap;">${story.description || '<brak opisu>'}</p>
+      <div class="d-flex justify-content-between align-items-center mt-2">
+        <div class="small text-muted" style="font-size: 0.75rem;">
+          <i class="bi bi-person me-1"></i> ${currentUser.firstName} ${currentUser.lastName} &nbsp;&middot;&nbsp; <i class="bi bi-calendar-event me-1"></i> ${formatDate(story.createdAt)}
+        </div>
+        <div class="d-flex gap-2 flex-shrink-0">
+          <button type="button" class="btn btn-sm btn-outline-info" data-action="story-active"><i class="bi bi-kanban"></i> Zadania</button>
+          <button type="button" class="btn btn-sm btn-outline-secondary" data-action="story-edit"><i class="bi bi-pencil"></i></button>
+          <button type="button" class="btn btn-sm btn-outline-danger" data-action="story-delete"><i class="bi bi-trash3"></i></button>
+        </div>
       </div>
     `;
 
@@ -541,6 +705,7 @@ form.addEventListener('submit', (event) => {
     const created = createProject({ name, description });
     activeProjectId = created.id;
     setActiveProjectId(created.id);
+    notificationService.notifyProjectCreated(created);
   }
 
   setProjectEditing(null);
@@ -670,14 +835,24 @@ storiesFilterButtons.forEach((btn) => {
     const filter = btn.dataset.filter as StoriesFilter | undefined;
     if (!filter) return;
     activeStoriesFilter = filter;
-    storiesFilterButtons.forEach((b) => b.classList.remove('stories-filter-btn--active'));
-    btn.classList.add('stories-filter-btn--active');
+    storiesFilterButtons.forEach((b) => {
+      b.classList.remove('active', 'btn-primary', 'btn-success');
+      b.classList.add('btn-outline-secondary');
+    });
+    btn.classList.remove('btn-outline-secondary');
+    if (filter === 'all' || filter === 'doing') {
+      btn.classList.add('active', 'btn-primary');
+    } else if (filter === 'done') {
+      btn.classList.add('active', 'btn-success');
+    } else {
+      btn.classList.add('active', 'btn-secondary');
+    }
     renderStories();
   });
 });
 
 cancelEditBtn.disabled = true;
-storiesFilterButtons[0]?.classList.add('stories-filter-btn--active');
+storiesFilterButtons[0]?.click();
 renderProjects();
 
 // Tasks Logic
@@ -709,23 +884,25 @@ function renderTasks(): void {
 
   tasks.forEach(task => {
     const div = document.createElement('div');
-    div.className = 'task-item';
+    div.className = 'card border border-secondary border-opacity-25 shadow-sm p-3 hover-lift cursor-pointer task-item';
     div.dataset.id = task.id;
 
-    let assigneeName = 'Brak';
+    let assigneeName = 'Nieprzypisane';
     if (task.assigneeId) {
       const u = getUsers().find(x => x.id === task.assigneeId);
       if (u) assigneeName = `${u.firstName} ${u.lastName}`;
     }
 
     div.innerHTML = `
-      <div class="task-title">${task.name}</div>
-      <div class="task-meta">
-        <span>Czas: ${task.estimatedHours}h</span>
-        <span>Priorytet: ${task.priority}</span>
+      <div class="fw-semibold small mb-2 text-body">${task.name}</div>
+      <div class="d-flex justify-content-between align-items-center mb-2 task-meta">
+        <span class="badge ${task.priority === 'high' ? 'bg-danger-subtle text-danger' : task.priority === 'medium' ? 'bg-warning-subtle text-warning' : 'bg-success-subtle text-success'} border border-opacity-25">
+          P: ${task.priority}
+        </span>
+        <span class="text-secondary fw-medium"><i class="bi bi-hourglass-split"></i> ${task.estimatedHours}h</span>
       </div>
-      <div class="task-meta">
-        <span>${assigneeName}</span>
+      <div class="d-flex justify-content-start align-items-center opacity-75">
+        <div class="small text-secondary" style="font-size: 0.7rem;"><i class="bi bi-person-circle me-1"></i> ${assigneeName}</div>
       </div>
     `;
 
@@ -834,11 +1011,16 @@ taskForm.addEventListener('submit', (e) => {
   if (id) {
     updateTask(id, { name, description, priority, estimatedHours });
   } else {
-    createTask({
+    const createdTask = createTask({
       name, description, priority, estimatedHours,
       storyId: activeStoryId,
       state: 'todo',
     });
+    const stories = getStoriesByProject(activeProjectId!);
+    const story = stories.find(s => s.id === activeStoryId);
+    if (story) {
+      notificationService.notifyTaskCreated(createdTask, story);
+    }
   }
 
   closeTaskModal();
@@ -850,7 +1032,17 @@ taskDeleteBtn.addEventListener('click', () => {
   const id = taskIdInput.value;
   if (!id) return;
   if (confirm('Usunąć zadanie?')) {
+    const tasks = getTasksByStory(activeStoryId!);
+    const taskToDelete = tasks.find(t => t.id === id);
+    const stories = getStoriesByProject(activeProjectId!);
+    const story = stories.find(s => s.id === activeStoryId);
+    
     deleteTask(id);
+    
+    if (taskToDelete && story) {
+      notificationService.notifyTaskDeleted(taskToDelete, story);
+    }
+    
     closeTaskModal();
     renderTasks();
     renderStories();
@@ -864,11 +1056,21 @@ taskStartBtn.addEventListener('click', () => {
     alert('Wybierz pracownika aby rozpocząć zadanie!');
     return;
   }
-  updateTask(id, {
+  const updatedTask = updateTask(id, {
     state: 'doing',
     assigneeId: assigneeId,
     startedAt: new Date().toISOString()
   });
+  
+  if (updatedTask) {
+    notificationService.notifyTaskAssigned(updatedTask);
+    const stories = getStoriesByProject(activeProjectId!);
+    const story = stories.find(s => s.id === activeStoryId);
+    if (story) {
+      notificationService.notifyTaskStatusChanged(updatedTask, story, 'doing');
+    }
+  }
+  
   closeTaskModal();
   renderTasks();
   renderStories();
@@ -877,10 +1079,19 @@ taskStartBtn.addEventListener('click', () => {
 taskDoneBtn.addEventListener('click', () => {
   const id = taskIdInput.value;
   if (!id) return;
-  updateTask(id, {
+  const updatedTask = updateTask(id, {
     state: 'done',
     finishedAt: new Date().toISOString()
   });
+  
+  if (updatedTask) {
+    const stories = getStoriesByProject(activeProjectId!);
+    const story = stories.find(s => s.id === activeStoryId);
+    if (story) {
+      notificationService.notifyTaskStatusChanged(updatedTask, story, 'done');
+    }
+  }
+  
   closeTaskModal();
   renderTasks();
   renderStories();
