@@ -33,7 +33,7 @@ if (!app) {
 
 const currentUser: User = getCurrentUser();
 
-app.innerHTML = \`
+app.innerHTML = `
 <div class="container py-4">
   <header class="d-flex justify-content-between align-items-center mb-4">
     <div>
@@ -41,7 +41,7 @@ app.innerHTML = \`
       <p class="text-secondary mb-0">Proste zarządzanie projektami, historyjkami i aktywnym kontekstem.</p>
     </div>
     <div class="d-flex align-items-center gap-3">
-      <button class="btn btn-outline-secondary rounded-circle notification-bell hover-lift" id="notifications-btn" data-bs-toggle="offcanvas" data-bs-target="#notifications-offcanvas" aria-controls="notifications-offcanvas">
+      <button class="btn btn-outline-secondary rounded-circle notification-bell hover-lift" id="notifications-btn" aria-controls="notifications-offcanvas">
         <i class="bi bi-bell"></i>
         <span class="badge bg-danger notification-badge shadow-sm" id="notifications-count" style="display: none;">0</span>
       </button>
@@ -258,6 +258,29 @@ app.innerHTML = \`
 </div>
 
 <div class="toast-container position-fixed bottom-0 end-0 p-3" id="toast-container" style="z-index: 1100"></div>
+
+<!-- Modal podglądu powiadomienia -->
+<div class="modal fade" id="notification-details-modal" tabindex="-1" aria-labelledby="notificationDetailsLabel" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title fw-bold" id="notificationDetailsLabel">Szczegóły powiadomienia</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Zamknij"></button>
+      </div>
+      <div class="modal-body">
+        <div class="d-flex justify-content-between align-items-center mb-3">
+          <span class="badge" id="notif-detail-priority"></span>
+          <small class="text-muted" id="notif-detail-date"></small>
+        </div>
+        <h4 class="h5 mb-3" id="notif-detail-title"></h4>
+        <p class="mb-0" id="notif-detail-message"></p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Zamknij</button>
+      </div>
+    </div>
+  </div>
+</div>
 `;
 
 const userNameLabel = document.querySelector<HTMLSpanElement>('#user-name')!;
@@ -272,7 +295,7 @@ const projectsCount = document.querySelector<HTMLSpanElement>('#projects-count')
 const saveBtn = document.querySelector<HTMLButtonElement>('#save-btn')!;
 
 // Story elements
-const storiesCard = document.querySelector<HTMLElement>('.stories-card')!;
+const storiesCard = document.querySelector<HTMLElement>('#stories-card')!;
 const storiesProjectLabel = document.querySelector<HTMLParagraphElement>('#stories-project-label')!;
 const storyForm = document.querySelector<HTMLFormElement>('#story-form')!;
 const storyIdInput = document.querySelector<HTMLInputElement>('#story-id')!;
@@ -378,7 +401,13 @@ const notificationsEmpty = document.querySelector<HTMLDivElement>('#notification
 const markAllReadBtn = document.querySelector<HTMLButtonElement>('#mark-all-read-btn')!;
 const toastContainer = document.querySelector<HTMLDivElement>('#toast-container')!;
 
-if (!notificationsBtn || !notificationsCount || !notificationsList || !notificationsEmpty || !markAllReadBtn || !toastContainer) {
+const notifModal = document.getElementById('notification-details-modal')!;
+const notifDetailTitle = document.getElementById('notif-detail-title')!;
+const notifDetailMessage = document.getElementById('notif-detail-message')!;
+const notifDetailDate = document.getElementById('notif-detail-date')!;
+const notifDetailPriority = document.getElementById('notif-detail-priority')!;
+
+if (!notificationsBtn || !notificationsCount || !notificationsList || !notificationsEmpty || !markAllReadBtn || !toastContainer || !notifModal || !notifDetailTitle || !notifDetailMessage || !notifDetailDate || !notifDetailPriority) {
   throw new Error('ManageMe Notifications UI elements not found');
 }
 
@@ -468,15 +497,74 @@ notificationsList.addEventListener('click', (e) => {
     return;
   }
 
-  // Kliknięcie w powiadomienie też oznacza jako przeczytane
+  // Kliknięcie w powiadomienie też oznacza jako przeczytane i otwiera modal
+  e.preventDefault();
   markNotificationAsRead(id);
   renderNotifications();
+  
+  const notifications = getNotifications(currentUser.id);
+  const notif = notifications.find(n => n.id === id);
+  if (notif) {
+    notifDetailTitle.textContent = notif.title;
+    notifDetailMessage.textContent = notif.message;
+    notifDetailDate.textContent = formatDate(notif.date);
+    
+    notifDetailPriority.className = 'badge';
+    if (notif.priority === 'high') {
+      notifDetailPriority.classList.add('bg-danger');
+      notifDetailPriority.textContent = 'Wysoki priorytet';
+    } else if (notif.priority === 'medium') {
+      notifDetailPriority.classList.add('bg-warning', 'text-dark');
+      notifDetailPriority.textContent = 'Średni priorytet';
+    } else {
+      notifDetailPriority.classList.add('bg-secondary');
+      notifDetailPriority.textContent = 'Niski priorytet';
+    }
+    
+    // @ts-ignore
+    const modal = new bootstrap.Modal(notifModal);
+    modal.show();
+  }
 });
 
 markAllReadBtn.addEventListener('click', () => {
   markAllNotificationsAsRead(currentUser.id);
   renderNotifications();
 });
+
+// Manualne otwieranie panelu powiadomień
+notificationsBtn.addEventListener('click', (e) => {
+  e.preventDefault();
+  const offcanvasEl = document.getElementById('notifications-offcanvas');
+  if (offcanvasEl) {
+    try {
+      // @ts-ignore
+      const offcanvas = bootstrap.Offcanvas.getOrCreateInstance(offcanvasEl);
+      offcanvas.show();
+    } catch (err) {
+      console.error(err);
+      // Awaryjne otwieranie okna
+      offcanvasEl.style.visibility = 'visible';
+      offcanvasEl.classList.add('show');
+    }
+  }
+});
+
+// Awaryjne zamykanie panelu
+const notifCloseBtn = document.querySelector<HTMLButtonElement>('#notifications-offcanvas .btn-close');
+if (notifCloseBtn) {
+  notifCloseBtn.addEventListener('click', () => {
+    const offcanvasEl = document.getElementById('notifications-offcanvas');
+    if (offcanvasEl) {
+      try {
+        // @ts-ignore
+        bootstrap.Offcanvas.getInstance(offcanvasEl)?.hide();
+      } catch(e) {}
+      offcanvasEl.style.visibility = 'hidden';
+      offcanvasEl.classList.remove('show');
+    }
+  });
+}
 
 window.addEventListener('app:new-notification', (e: Event) => {
   const notif = (e as CustomEvent).detail as Notification;
@@ -563,7 +651,8 @@ function renderProjects(): void {
 
   for (const project of projects) {
     const li = document.createElement('li');
-    li.className = `p-3 mb-2 rounded border hover-lift d-flex justify-content-between align-items-start gap-3 ${activeProjectId === project.id ? 'border-primary border-2 bg-primary bg-opacity-10' : 'border-secondary border-opacity-25 bg-body-tertiary bg-opacity-50'}`;
+    li.dataset.id = project.id;
+    li.className = `project-item p-3 mb-2 rounded border hover-lift d-flex justify-content-between align-items-start gap-3 ${activeProjectId === project.id ? 'border-primary border-2 bg-primary bg-opacity-10' : 'border-secondary border-opacity-25 bg-body-tertiary bg-opacity-50'}`;
     li.innerHTML = `
       <div class="flex-grow-1">
         <h3 class="h6 fw-semibold mb-1">${project.name || 'Bez nazwy'}</h3>
@@ -656,7 +745,8 @@ function renderStories(): void {
 
   filteredStories.forEach((story) => {
     const li = document.createElement('li');
-    li.className = 'p-3 mb-2 rounded border border-secondary border-opacity-25 bg-body-tertiary bg-opacity-50 hover-lift d-flex flex-column gap-2 cursor-pointer';
+    li.dataset.id = story.id;
+    li.className = 'story-item p-3 mb-2 rounded border border-secondary border-opacity-25 bg-body-tertiary bg-opacity-50 hover-lift d-flex flex-column gap-2 cursor-pointer';
     li.innerHTML = `
       <div class="d-flex gap-2 justify-content-between align-items-start">
         <h3 class="h6 fw-semibold mb-0">${story.name || 'Bez tytułu'}</h3>
